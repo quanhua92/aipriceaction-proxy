@@ -2,8 +2,19 @@
 # Optimized for minimal size, security, and fast builds with cargo-chef
 
 # Stage 1: Build planner for cargo-chef
-FROM clux/muslrust:1.88.0-stable-2025-07-27 AS chef
+FROM rust:1.88-alpine AS chef
 USER root
+
+# Install build dependencies for Alpine
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig \
+    openssl-dev \
+    ca-certificates \
+    gcc \
+    g++ \
+    make
+
 RUN cargo install cargo-chef
 WORKDIR /app
 
@@ -25,15 +36,19 @@ ARG TARGETPLATFORM
 COPY --from=rust-planner /app/recipe.json recipe.json
 COPY ./Cargo.toml ./Cargo.toml
 
-RUN export TARGET_ARCH=$(case ${TARGETPLATFORM:-linux/amd64} in \
-         "linux/amd64") echo "x86_64-unknown-linux-musl" ;; \
-         "linux/arm64") echo "aarch64-unknown-linux-musl" ;; \
-         *) echo "aarch64-unknown-linux-musl" ;; \
-    esac) && \
-    echo "Installing Rust target: ${TARGET_ARCH}" && \
-    rustup target add ${TARGET_ARCH} && \
-    echo "Cooking dependencies for target: ${TARGET_ARCH}" && \
-    cargo chef cook --release --target ${TARGET_ARCH} --recipe-path recipe.json
+# Add Alpine build dependencies for this stage
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig \
+    openssl-dev \
+    ca-certificates \
+    gcc \
+    g++ \
+    make
+
+# Use native musl target for the current architecture
+RUN echo "Building for native musl target" && \
+    cargo chef cook --release --recipe-path recipe.json
 
 # Stage 3: Build the application
 FROM chef AS rust-builder
@@ -46,16 +61,20 @@ COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./src ./src
 
-RUN export TARGET_ARCH=$(case ${TARGETPLATFORM:-linux/amd64} in \
-         "linux/amd64") echo "x86_64-unknown-linux-musl" ;; \
-         "linux/arm64") echo "aarch64-unknown-linux-musl" ;; \
-         *) echo "aarch64-unknown-linux-musl" ;; \
-    esac) && \
-    echo "Installing Rust target: ${TARGET_ARCH}" && \
-    rustup target add ${TARGET_ARCH} && \
-    echo "Building binary for target: ${TARGET_ARCH}" && \
-    cargo build --release --target ${TARGET_ARCH} && \
-    cp target/${TARGET_ARCH}/release/aipriceaction-proxy /app/aipriceaction-proxy-bin
+# Add Alpine build dependencies for this stage
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig \
+    openssl-dev \
+    ca-certificates \
+    gcc \
+    g++ \
+    make
+
+# Build for native musl target
+RUN echo "Building binary for native musl target" && \
+    cargo build --release && \
+    cp target/release/aipriceaction-proxy /app/aipriceaction-proxy-bin
 
 # Stage 4: Create the final, minimal production image
 FROM alpine:3.22 AS final-image
