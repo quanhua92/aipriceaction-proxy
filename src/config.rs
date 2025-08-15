@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub public_peers: PeerList,
     pub core_network_url: Option<String>,
     pub public_refresh_interval: Duration,
+    pub environment: String,
 }
 
 impl AppConfig {
@@ -57,12 +58,16 @@ impl AppConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(300); // Default to 5 minutes
 
+        let environment = env::var("ENVIRONMENT")
+            .unwrap_or_else(|_| "development".to_string());
+
         Self {
             tokens,
             internal_peers,
             public_peers,
             core_network_url,
             public_refresh_interval: Duration::from_secs(refresh_interval_secs),
+            environment,
         }
     }
 }

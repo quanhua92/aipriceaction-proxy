@@ -37,14 +37,16 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                             });
                         }
                         
-                        // --- 2. Broadcast to PUBLIC peers (untrusted, no token) ---
-                        for peer_url in config.public_peers.iter() {
-                            let client = gossip_client.clone();
-                            let payload = gossip_payload.clone();
-                            let url = format!("{}/public/gossip", peer_url);
-                             tokio::spawn(async move {
-                                let _ = client.post(&url).json(&payload).send().await;
-                            });
+                        // --- 2. Broadcast to PUBLIC peers (untrusted, no token) - only in production ---
+                        if config.environment == "production" {
+                            for peer_url in config.public_peers.iter() {
+                                let client = gossip_client.clone();
+                                let payload = gossip_payload.clone();
+                                let url = format!("{}/public/gossip", peer_url);
+                                 tokio::spawn(async move {
+                                    let _ = client.post(&url).json(&payload).send().await;
+                                });
+                            }
                         }
                     }
                 }
