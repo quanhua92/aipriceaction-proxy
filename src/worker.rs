@@ -126,12 +126,12 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                                 let auth_token = format!("Bearer {}", config.tokens.primary);
                                 let internal_peer_count = config.internal_peers.len();
                                 
-                                // During non-office hours, reduce internal peer broadcasting frequency
-                                let should_broadcast_internal = if !is_office_hours {
+                                // During non-office hours, reduce internal peer broadcasting frequency (only if office hours are enabled)
+                                let should_broadcast_internal = if config.enable_office_hours && !is_office_hours {
                                     // Only broadcast every 3rd update during non-office hours
                                     (iteration_count % 3) == 0
                                 } else {
-                                    true // Always broadcast during office hours
+                                    true // Always broadcast during office hours OR when office hours are disabled
                                 };
                                 
                                 if should_broadcast_internal {
@@ -162,8 +162,8 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                                     debug!(symbol, is_office_hours, iteration = iteration_count, "Skipping internal peer broadcast (non-office hours throttling)");
                                 }
                                 
-                                // --- 2. Broadcast to PUBLIC peers (untrusted, no token) - only in production and office hours ---
-                                if config.environment == "production" && is_office_hours {
+                                // --- 2. Broadcast to PUBLIC peers (untrusted, no token) - only in production and office hours (unless office hours disabled) ---
+                                if config.environment == "production" && (!config.enable_office_hours || is_office_hours) {
                                     let public_peer_count = config.public_peers.len();
                                     info!(symbol, public_peers = public_peer_count, "Broadcasting to public peers");
                                     
@@ -190,8 +190,10 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                                     }
                                 } else if config.environment != "production" {
                                     debug!(environment = %config.environment, "Skipping public peer broadcast (not in production)");
-                                } else {
+                                } else if config.enable_office_hours && !is_office_hours {
                                     debug!(is_office_hours, "Skipping public peer broadcast (non-office hours)");
+                                } else {
+                                    debug!("Unexpected state in public peer broadcast logic");
                                 }
                             }
                         } else {
