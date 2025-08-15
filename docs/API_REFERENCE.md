@@ -33,18 +33,28 @@ Retrieve OHLCV (Open, High, Low, Close, Volume) data for stocks.
 
 **Query Parameters:**
 - `symbol` (optional): Filter results to specific ticker symbols. Can be provided multiple times to fetch multiple symbols.
+- `start_date` (optional): Start date for historical data in YYYY-MM-DD format. If not provided, defaults to returning only the most recent data point.
+- `end_date` (optional): End date for historical data in YYYY-MM-DD format. If not provided, defaults to returning only the most recent data point.
+
+**Default Behavior:** When no date parameters are specified, the endpoint returns only the **most recent data point** for each ticker symbol for optimal performance.
 
 **Examples:**
 
 ```bash
-# Get all available ticker data
+# Get latest data for all tickers (most recent data point only)
 curl "http://localhost:8888/tickers"
 
-# Get data for a single ticker
-curl "http://localhost:8888/tickers?symbol=VNINDEX"
+# Get latest data for specific tickers (most recent data point only)
+curl "http://localhost:8888/tickers?symbol=VNINDEX&symbol=VIX"
 
-# Get data for multiple tickers
-curl "http://localhost:8888/tickers?symbol=VNINDEX&symbol=VIX&symbol=BMP"
+# Get historical data for a date range (multiple data points)
+curl "http://localhost:8888/tickers?start_date=2025-08-01&end_date=2025-08-15"
+
+# Get historical data for specific tickers and date range
+curl "http://localhost:8888/tickers?symbol=VIX&start_date=2025-08-10&end_date=2025-08-15"
+
+# Get data for a specific date
+curl "http://localhost:8888/tickers?start_date=2025-08-14&end_date=2025-08-14"
 ```
 
 **Response Format:**
@@ -66,12 +76,14 @@ curl "http://localhost:8888/tickers?symbol=VNINDEX&symbol=VIX&symbol=BMP"
 
 **Response Codes:**
 - `200 OK`: Successfully retrieved ticker data (returns empty object `{}` if no matching symbols found)
+- `400 Bad Request`: Invalid date format (dates must be in YYYY-MM-DD format)
 
 **Use Cases:**
-- Real-time market data monitoring
-- Historical price analysis
+- Real-time market data monitoring (use default behavior for latest data)
+- Historical price analysis (use date range parameters)
 - Portfolio tracking
 - Financial dashboard display
+- Specific date data retrieval (use same start_date and end_date)
 
 ---
 
@@ -384,7 +396,7 @@ services:
       - RUST_LOG=info
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8888/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -405,7 +417,7 @@ services:
       - core-node
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8888/health"]
       interval: 30s
       timeout: 10s
       retries: 3
