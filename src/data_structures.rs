@@ -39,6 +39,53 @@ impl Default for ActorMetadata {
 
 // Main in-memory cache for all stock data
 pub type InMemoryData = HashMap<String, Vec<OhlcvData>>;
+
+// Memory management constants
+pub const MAX_MEMORY_MB: usize = 100;
+pub const MAX_MEMORY_BYTES: usize = MAX_MEMORY_MB * 1024 * 1024;
+pub const MAX_DATA_POINTS_PER_SYMBOL: usize = 100; // Limit historical data per symbol
+
+// Memory estimation functions
+pub fn estimate_ohlcv_data_size(data: &OhlcvData) -> usize {
+    std::mem::size_of::<DateTime<Utc>>() +  // time
+    std::mem::size_of::<f64>() * 4 +        // open, high, low, close
+    std::mem::size_of::<u64>() +            // volume
+    data.symbol.as_ref().map_or(0, |s| s.len()) // symbol string
+}
+
+pub fn estimate_memory_usage(data: &InMemoryData) -> usize {
+    let mut total_size = std::mem::size_of::<HashMap<String, Vec<OhlcvData>>>();
+    
+    for (symbol, ohlcv_vec) in data {
+        total_size += symbol.len(); // Key string
+        total_size += std::mem::size_of::<Vec<OhlcvData>>(); // Vec overhead
+        total_size += ohlcv_vec.capacity() * std::mem::size_of::<OhlcvData>(); // Vec capacity
+        
+        for ohlcv in ohlcv_vec {
+            total_size += estimate_ohlcv_data_size(ohlcv);
+        }
+    }
+    
+    total_size
+}
+
+pub fn cleanup_old_data(data: &mut InMemoryData) -> (usize, usize) {
+    let mut cleaned_symbols = 0;
+    let mut cleaned_data_points = 0;
+    
+    for (_symbol, ohlcv_vec) in data.iter_mut() {
+        if ohlcv_vec.len() > MAX_DATA_POINTS_PER_SYMBOL {
+            // Sort by time and keep only the most recent data points
+            ohlcv_vec.sort_by(|a, b| b.time.cmp(&a.time)); // Newest first
+            let original_len = ohlcv_vec.len();
+            ohlcv_vec.truncate(MAX_DATA_POINTS_PER_SYMBOL);
+            cleaned_data_points += original_len - ohlcv_vec.len();
+            cleaned_symbols += 1;
+        }
+    }
+    
+    (cleaned_symbols, cleaned_data_points)
+}
 pub type SharedData = Arc<Mutex<InMemoryData>>;
 
 // Reputation tracker for public contributors
@@ -90,6 +137,12 @@ pub struct HealthStats {
     pub total_tickers_count: usize,
     pub active_tickers_count: usize,
     
+    // Memory statistics
+    pub memory_usage_bytes: usize,
+    pub memory_usage_mb: f64,
+    pub memory_limit_mb: usize,
+    pub memory_usage_percent: f64,
+    
     // Peer counts (safe - no addresses)
     pub internal_peers_count: usize,
     pub public_peers_count: usize,
@@ -121,6 +174,10 @@ impl Default for HealthStats {
             uptime_secs: 0,
             total_tickers_count: 0,
             active_tickers_count: 0,
+            memory_usage_bytes: 0,
+            memory_usage_mb: 0.0,
+            memory_limit_mb: MAX_MEMORY_MB,
+            memory_usage_percent: 0.0,
             internal_peers_count: 0,
             public_peers_count: 0,
             iteration_count: 0,

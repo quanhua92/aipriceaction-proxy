@@ -96,11 +96,16 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
             }
         }
         
-        // Update health stats
+        // Update health stats and check memory usage
         {
             let mut health = health_stats.lock().await;
             let data_guard = data.lock().await;
             let (current_time, debug_override) = get_time_info();
+            
+            // Calculate memory usage
+            let memory_bytes = crate::data_structures::estimate_memory_usage(&*data_guard);
+            let memory_mb = memory_bytes as f64 / (1024.0 * 1024.0);
+            let memory_percent = (memory_bytes as f64 / crate::data_structures::MAX_MEMORY_BYTES as f64) * 100.0;
             
             health.is_office_hours = is_office_hours;
             health.current_interval_secs = current_interval.as_secs();
@@ -108,11 +113,22 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
             health.uptime_secs = start_time.elapsed().as_secs();
             health.total_tickers_count = all_tickers.len();
             health.active_tickers_count = data_guard.len();
+            health.memory_usage_bytes = memory_bytes;
+            health.memory_usage_mb = memory_mb;
+            health.memory_usage_percent = memory_percent;
             health.last_update_timestamp = Some(Utc::now().to_rfc3339());
             health.current_system_time = current_time;
             health.debug_time_override = debug_override;
             
             drop(data_guard);
+            
+            info!(
+                iteration = iteration_count,
+                memory_mb = format!("{:.2}", memory_mb),
+                memory_percent = format!("{:.1}%", memory_percent),
+                active_tickers = health.active_tickers_count,
+                "Memory usage stats"
+            );
         }
         
         debug!(
@@ -150,9 +166,26 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                         if let Some(data_vec) = ohlcv_data_vec {
                             let data_points = data_vec.len();
                             let latest_data = data_vec.last().cloned();
-                            data_guard.insert(symbol.clone(), data_vec);
+                            let date_range = if !data_vec.is_empty() {
+                                format!("{} to {}", 
+                                    data_vec.first().unwrap().time.format("%Y-%m-%d"),
+                                    data_vec.last().unwrap().time.format("%Y-%m-%d"))
+                            } else {
+                                "empty".to_string()
+                            };
+                            
+                            // Limit data points per symbol to prevent memory bloat
+                            let mut limited_data_vec = data_vec;
+                            if limited_data_vec.len() > crate::data_structures::MAX_DATA_POINTS_PER_SYMBOL {
+                                // Sort by time and keep only the most recent data points
+                                limited_data_vec.sort_by(|a, b| b.time.cmp(&a.time)); // Newest first
+                                limited_data_vec.truncate(crate::data_structures::MAX_DATA_POINTS_PER_SYMBOL);
+                                debug!(symbol, original_points = data_points, limited_points = limited_data_vec.len(), "Limited data points per symbol");
+                            }
+                            
+                            data_guard.insert(symbol.clone(), limited_data_vec);
                             updated_symbols.push(symbol.clone());
-                            debug!(symbol, data_points, "Updated symbol data");
+                            debug!(symbol, data_points, date_range, "Updated symbol data with date range");
 
                             if let Some(gossip_payload) = latest_data {
                                 // --- 1. Broadcast to INTERNAL peers (trusted, with token) ---
@@ -249,6 +282,40 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
         }
         
         info!(iteration = iteration_count, "Completed full cycle of all ticker batches");
+        
+        // Check memory usage and cleanup if needed
+        {
+            let mut data_guard = data.lock().await;
+            let memory_bytes = crate::data_structures::estimate_memory_usage(&*data_guard);
+            let memory_mb = memory_bytes as f64 / (1024.0 * 1024.0);
+            
+            if memory_bytes > crate::data_structures::MAX_MEMORY_BYTES {
+                warn!(
+                    memory_mb = format!("{:.2}", memory_mb),
+                    limit_mb = crate::data_structures::MAX_MEMORY_MB,
+                    "Memory limit exceeded, cleaning up old data"
+                );
+                
+                let (cleaned_symbols, cleaned_data_points) = crate::data_structures::cleanup_old_data(&mut *data_guard);
+                let new_memory_bytes = crate::data_structures::estimate_memory_usage(&*data_guard);
+                let new_memory_mb = new_memory_bytes as f64 / (1024.0 * 1024.0);
+                
+                info!(
+                    cleaned_symbols,
+                    cleaned_data_points,
+                    old_memory_mb = format!("{:.2}", memory_mb),
+                    new_memory_mb = format!("{:.2}", new_memory_mb),
+                    "Memory cleanup completed"
+                );
+            } else {
+                debug!(
+                    memory_mb = format!("{:.2}", memory_mb),
+                    limit_mb = crate::data_structures::MAX_MEMORY_MB,
+                    "Memory usage within limits"
+                );
+            }
+        }
+        
         debug!(interval = ?current_interval, "Sleeping before next full cycle");
         tokio::time::sleep(current_interval).await;
         

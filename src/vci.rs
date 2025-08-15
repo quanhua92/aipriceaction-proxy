@@ -30,6 +30,7 @@ impl From<serde_json::Error> for VciError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OhlcvData {
+    #[serde(serialize_with = "serialize_time_as_date")]
     pub time: DateTime<Utc>,
     pub open: f64,
     pub high: f64,
@@ -37,6 +38,14 @@ pub struct OhlcvData {
     pub close: f64,
     pub volume: u64,
     pub symbol: Option<String>,
+}
+
+fn serialize_time_as_date<S>(time: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let date_string = time.format("%Y-%m-%d").to_string();
+    serializer.serialize_str(&date_string)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,14 +247,18 @@ impl VciClient {
             Some(date) => {
                 let naive_date = NaiveDate::parse_from_str(date, "%Y-%m-%d")
                     .expect("Invalid date format");
-                // Add one day first, then convert to timestamp
+                // Add one day to get the 'to' timestamp (exclusive end) - matching Python implementation
                 let next_day = naive_date + ChronoDuration::days(1);
                 let naive_datetime = next_day.and_hms_opt(0, 0, 0).unwrap();
-                // Use local timezone like Python does - approximate with UTC-7 for Vietnam/US Pacific
                 let datetime = naive_datetime.and_utc();
-                datetime.timestamp() - 7 * 3600 // Subtract 7 hours to match Python's local timezone behavior
+                datetime.timestamp()
             }
-            None => Utc::now().timestamp(),
+            None => {
+                // For current timestamp, add 1 day as well
+                let now = Utc::now();
+                let next_day = now + ChronoDuration::days(1);
+                next_day.timestamp()
+            },
         }
     }
 
@@ -256,13 +269,30 @@ impl VciClient {
             None => Utc::now().date_naive(),
         };
 
-        let days = (end_date - start_date).num_days() as u32;
-        
-        match interval {
-            "1D" | "1W" | "1M" => days + 10,
-            "1H" => days * 7 + 10,
-            _ => days * 7 * 60 + 10,
+        // Calculate actual business days (exclude weekends) - matching Python pd.bdate_range
+        let mut business_days = 0u32;
+        let mut current_date = start_date;
+        while current_date <= end_date {
+            // Skip weekends (Saturday = 6, Sunday = 0)
+            let weekday = current_date.weekday().num_days_from_sunday();
+            if weekday != 0 && weekday != 6 {  // Not Sunday(0) or Saturday(6)
+                business_days += 1;
+            }
+            current_date += ChronoDuration::days(1);
         }
+        
+        // VCI API needs much larger buffer to reliably return historical data
+        let count_back = match interval {
+            "1D" => business_days + 100, // Large buffer for reliable historical data
+            "1W" | "1M" => business_days + 100,
+            "1H" => ((business_days as f32 * 6.5) as u32) + 100,
+            _ => ((business_days as f32 * 6.5 * 60.0) as u32) + 100,
+        };
+
+        tracing::debug!("Count back calculation: start={}, end={:?}, business_days={} (Python-style), count_back={}", 
+            start, end, business_days, count_back);
+
+        count_back
     }
 
     pub async fn get_history(
@@ -379,6 +409,10 @@ impl VciClient {
             "countBack": count_back
         });
 
+        tracing::debug!("VCI API request: interval={}, start={}, end={:?}, count_back={}, to_timestamp={}", 
+            interval, start, end, count_back, end_timestamp);
+        
+        tracing::debug!("VCI API payload: {}", serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "failed to serialize".to_string()));
 
         let response_data = self.make_request(&url, &payload).await?;
 
@@ -391,6 +425,8 @@ impl VciClient {
 
         let mut results = HashMap::new();
         let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d").expect("Invalid start date");
+
+        tracing::debug!("VCI filtering with start_date: {}, end_date: {:?}", start_date, end);
 
         // Create a mapping from response data using symbol field
         let mut response_map = HashMap::new();
@@ -456,7 +492,24 @@ impl VciClient {
             }
 
             let mut symbol_data = Vec::new();
+            let mut total_data_points = 0;
+            let mut filtered_data_points = 0;
+            
+            // Debug: Show all timestamps in raw VCI response
+            tracing::debug!("Symbol {}: Raw VCI timestamps from API:", symbol);
+            for j in 0..length.min(10) { // Show first 10 timestamps
+                let timestamp = if let Some(ts_str) = times[j].as_str() {
+                    ts_str.parse::<i64>().unwrap_or(0)
+                } else {
+                    times[j].as_i64().unwrap_or(0)
+                };
+                let time = DateTime::<Utc>::from_timestamp(timestamp, 0).unwrap_or_default();
+                tracing::debug!("  Raw timestamp[{}]: {} -> {}", j, timestamp, time.format("%Y-%m-%d %H:%M:%S"));
+            }
+            
             for j in 0..length {
+                total_data_points += 1;
+                
                 // Try to get timestamp as string first, then as i64 (same fix as above)
                 let timestamp = if let Some(ts_str) = times[j].as_str() {
                     ts_str.parse::<i64>().unwrap_or(0)
@@ -466,6 +519,7 @@ impl VciClient {
                 let time = DateTime::<Utc>::from_timestamp(timestamp, 0).unwrap_or_default();
 
                 if time.date_naive() >= start_date {
+                    filtered_data_points += 1;
                     symbol_data.push(OhlcvData {
                         time,
                         open: opens[j].as_f64().unwrap_or(0.0),
@@ -477,6 +531,9 @@ impl VciClient {
                     });
                 }
             }
+
+            tracing::debug!("Symbol {}: VCI returned {} data points, filtered to {} (start_date: {})", 
+                symbol, total_data_points, filtered_data_points, start_date);
 
             symbol_data.sort_by(|a, b| a.time.cmp(&b.time));
             
