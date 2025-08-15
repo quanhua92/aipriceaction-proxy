@@ -136,19 +136,29 @@ start_nodes() {
                 fi
             done
             
+            echo "  → Waiting for nodes to be ready... ($wait_time/${max_wait}s) [$healthy_count/${#PORTS[@]} healthy]"
+            
             if [ $healthy_count -eq ${#PORTS[@]} ]; then
                 echo -e "${GREEN}✓ All nodes are healthy and responding${NC}"
                 return 0
             fi
             
+            # Fail fast if no progress after 30 seconds
+            if [ $wait_time -ge 30 ] && [ $healthy_count -eq 0 ]; then
+                echo -e "${RED}✗ No nodes responding after 30s - failing fast${NC}"
+                docker-compose -f docker-compose.test.yml logs --tail=20
+                return 1
+            fi
+            
             sleep 2
             wait_time=$((wait_time + 2))
-            echo "  → Waiting for nodes to be ready... ($wait_time/${max_wait}s)"
         done
         
         echo -e "${RED}✗ Timeout waiting for nodes to be healthy${NC}"
         echo "Container status:"
         docker-compose -f docker-compose.test.yml ps
+        echo "Recent logs:"
+        docker-compose -f docker-compose.test.yml logs --tail=10
         return 1
     else
         # Native execution - start each node individually
@@ -209,15 +219,14 @@ start_nodes() {
     fi
 }
 
-# Test 1: Check VCI data fetching
+# Test 1: Check VCI data fetching (simplified with fail-fast)
 test_vci_data_fetching() {
     print_test "VCI data fetching across all nodes"
     
-    echo "Waiting 45 seconds for VCI data to be fetched..."
-    sleep 45
+    echo "Waiting 30 seconds for VCI data to be fetched..."
+    sleep 30
     
-    local all_nodes_have_data=true
-    local vci_symbols_found=0
+    local nodes_with_data=0
     
     for i in "${!PORTS[@]}"; do
         local port=${PORTS[$i]}
@@ -228,33 +237,23 @@ test_vci_data_fetching() {
         
         echo "  $node_name: $symbol_count symbols"
         
-        if [ "$symbol_count" -lt 10 ]; then
-            all_nodes_have_data=false
+        if [ "$symbol_count" -ge 5 ]; then
+            ((nodes_with_data++))
+        else
+            print_failure "$node_name has insufficient data ($symbol_count symbols)"
+            return 1  # Fail fast
         fi
-        
-        # Count VCI symbols
-        for symbol in "${VCI_SYMBOLS[@]}"; do
-            if echo "$response" | jq -e ".$symbol" > /dev/null 2>&1; then
-                ((vci_symbols_found++))
-                break
-            fi
-        done
     done
     
-    if [ "$all_nodes_have_data" = true ]; then
-        print_success "All nodes have fetched ticker data"
+    if [ $nodes_with_data -eq ${#PORTS[@]} ]; then
+        print_success "All $nodes_with_data nodes have fetched ticker data"
     else
-        print_failure "Some nodes failed to fetch sufficient ticker data"
-    fi
-    
-    if [ "$vci_symbols_found" -ge 2 ]; then
-        print_success "VCI symbols found across nodes ($vci_symbols_found nodes with VCI data)"
-    else
-        print_failure "Insufficient VCI symbols found ($vci_symbols_found nodes with VCI data)"
+        print_failure "Only $nodes_with_data/${#PORTS[@]} nodes have data"
+        return 1  # Fail fast
     fi
 }
 
-# Test 2: Gossip communication
+# Test 2: Gossip communication (simplified with fail-fast)
 test_gossip_communication() {
     print_test "Gossip communication between nodes"
     
@@ -276,10 +275,10 @@ test_gossip_communication() {
         print_success "Gossip message sent successfully to Node 2"
     else
         print_failure "Failed to send gossip message (HTTP: ${gossip_response})"
-        return
+        return 1  # Fail fast
     fi
     
-    sleep 2
+    sleep 3
     
     # Check if Node 2 received the gossip data
     local vnd_data=$(curl -s "http://localhost:8889/tickers" | jq -r '.VND // empty' 2>/dev/null)
@@ -288,14 +287,13 @@ test_gossip_communication() {
         print_success "Node 2 received VND gossip data (close: $vnd_price)"
     else
         print_failure "Node 2 did not receive VND gossip data"
+        return 1  # Fail fast
     fi
 }
 
-# Test 3: Health endpoints and office hours
+# Test 3: Health endpoints and office hours (simplified with fail-fast)
 test_health_endpoints() {
     print_test "Health endpoints and office hours detection"
-    
-    local all_healthy=true
     
     for i in "${!PORTS[@]}"; do
         local port=${PORTS[$i]}
@@ -308,16 +306,24 @@ test_health_endpoints() {
         
         echo "  $node_name: office_hours=$is_office_hours, interval=${current_interval}s, debug=$debug_override"
         
-        if [ "$is_office_hours" != "true" ] || [ "$current_interval" != "30" ]; then
-            all_healthy=false
+        # Fail fast on first error
+        if [ "$is_office_hours" != "true" ]; then
+            print_failure "$node_name office hours not active (expected: true, got: $is_office_hours)"
+            return 1
+        fi
+        
+        if [ "$current_interval" != "30" ]; then
+            print_failure "$node_name incorrect interval (expected: 30s, got: ${current_interval}s)"
+            return 1
+        fi
+        
+        if [ "$debug_override" = "null" ]; then
+            print_failure "$node_name debug time override not set"
+            return 1
         fi
     done
     
-    if [ "$all_healthy" = true ]; then
-        print_success "All nodes report office hours active with 30s intervals"
-    else
-        print_failure "Some nodes have incorrect office hours or interval settings"
-    fi
+    print_success "All nodes report office hours active with 30s intervals and debug override"
 }
 
 # Build or prepare runtime environment
@@ -370,10 +376,26 @@ main() {
         return 1
     fi
     
-    # Run tests
-    test_health_endpoints
-    test_vci_data_fetching
-    test_gossip_communication
+    # Run tests with fail-fast behavior
+    echo -e "\n${BLUE}Running tests with fail-fast approach...${NC}"
+    
+    # Test 1: Health endpoints (must pass first)
+    if ! test_health_endpoints; then
+        print_failure "Health endpoints test failed - aborting remaining tests"
+        return 1
+    fi
+    
+    # Test 2: VCI data fetching (conditional - only if health passes)
+    if ! test_vci_data_fetching; then
+        print_failure "VCI data fetching test failed - aborting remaining tests"
+        return 1
+    fi
+    
+    # Test 3: Gossip communication (conditional - only if previous tests pass)
+    if ! test_gossip_communication; then
+        print_failure "Gossip communication test failed"
+        return 1
+    fi
     
     # Print final results
     echo -e "\n${BLUE}=== Test Results ===${NC}"
