@@ -176,6 +176,8 @@ impl VciClient {
             }
 
             let user_agent = self.get_user_agent();
+            
+            
             let response = self.client
                 .post(url)
                 .header("Accept", "application/json, text/plain, */*")
@@ -374,16 +376,40 @@ impl VciClient {
 
         let response_array = response_data.as_array().unwrap();
 
+
         let mut results = HashMap::new();
         let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d").expect("Invalid start date");
 
-        for (i, symbol) in symbols.iter().enumerate() {
-            if i >= response_array.len() {
+        // Create a mapping from response data using symbol field
+        let mut response_map = HashMap::new();
+        for (i, data_item) in response_array.iter().enumerate() {
+            if let Some(obj) = data_item.as_object() {
+                // Find symbol identifier in response
+                let symbol_fields = ["symbol", "ticker", "Symbol", "Ticker", "s"];
+                let mut response_symbol = None;
+                for field in &symbol_fields {
+                    if let Some(val) = obj.get(*field).and_then(|v| v.as_str()) {
+                        response_symbol = Some(val.to_uppercase());
+                        break;
+                    }
+                }
+                
+                if let Some(sym) = response_symbol {
+                    response_map.insert(sym.clone(), data_item.clone());
+                }
+            }
+        }
+
+        // Process each requested symbol using correct mapping
+        for symbol in symbols {
+            let symbol_upper = symbol.to_uppercase();
+            
+            if !response_map.contains_key(&symbol_upper) {
                 results.insert(symbol.clone(), None);
                 continue;
             }
-
-            let data_item = &response_array[i];
+            
+            let data_item = response_map.get(&symbol_upper).unwrap();
             let required_keys = ["o", "h", "l", "c", "v", "t"];
             
             let mut valid = true;

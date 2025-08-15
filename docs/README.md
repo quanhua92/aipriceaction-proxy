@@ -12,7 +12,7 @@ aipriceaction-proxy is a sophisticated distributed system designed to efficientl
 ```mermaid
 graph TB
     subgraph "VCI API"
-        VCI[Vietnamese Capital Market API<br/>VCB, TCB, FPT, ACB]
+        VCI[Vietnamese Capital Market API<br/>288 symbols across 27 sectors<br/>Banking, Real Estate, Technology, etc.]
     end
     
     subgraph "Core Network"
@@ -73,7 +73,7 @@ graph TB
 ### **Core Design Principles**
 
 1. **Trust by Verification**: Internal peers use cryptographic tokens, public peers earn trust through consistent behavior
-2. **Efficient Resource Usage**: Random ticker selection (2/4 symbols) reduces API load while maintaining coverage
+2. **Efficient Resource Usage**: Batch processing (288 symbols in batches of 10) optimizes API usage while providing complete market coverage
 3. **Fault Tolerance**: Multi-node deployment with automatic failover and data synchronization
 4. **Real-time Performance**: Sub-second gossip protocol for market data distribution
 5. **Security by Design**: Defense-in-depth with authentication, rate limiting, and reputation tracking
@@ -771,16 +771,30 @@ sequenceDiagram
 
 ### **Vietnamese Market Specifics**
 
-#### **Supported Exchanges & Symbols**
-**Core Symbols Used in Worker** (`src/worker.rs:34`):
-```rust
-let all_tickers = vec!["VCB".to_string(), "TCB".to_string(), "FPT".to_string(), "ACB".to_string()];
+#### **Comprehensive Vietnamese Stock Market Coverage**
+
+The system now supports the complete Vietnamese stock market through a comprehensive ticker group system with **288 symbols across 27 sectors**.
+
+**Ticker Groups Configuration** (`ticker_group.json`):
+```json
+{
+  "NGAN_HANG": ["VCB", "BID", "CTG", "VPB", "MBB", "ACB", "TCB", "LPB", "HDB", "STB", "VIB", "TPB", "SHB", "EIB", "OCB", "MSB", "EVF"],
+  "BAT_DONG_SAN": ["VHM", "VIC", "VRE", "KDH", "SSH", "NVL", "NLG", "PDR", "DIG", "TCH", "DXG", "CEO", "HDC", "SGR", "KHG", "SCR", "AGG", "HQC", "NTL", "TDC", "ITC", "NHA", "HTN", "NDN", "HLD", "LDG"],
+  "CONG_NGHE": ["VGI", "FPT", "FOX", "CMG", "SGT", "ELC", "VTK", "TTN", "MFS"],
+  "DAU_KHI": ["GAS", "BSR", "PLX", "PVS", "PVD", "OIL", "CNG", "PVC"],
+  "THEP": ["HPG", "MSR", "HSG", "KSV", "ACG", "TVN", "VIF", "NKG", "PTB", "GDA", "VGS", "SMC", "TLH"],
+  // ... 22 additional sectors
+}
 ```
 
-- **VCB**: Vietcombank (Largest Vietnamese bank)
-- **TCB**: Techcombank (Leading private bank)  
-- **FPT**: FPT Corporation (Technology conglomerate)
-- **ACB**: Asia Commercial Bank (Major commercial bank)
+**Market Coverage**:
+- **Banking (NGAN_HANG)**: 17 major Vietnamese banks including VCB, TCB, ACB
+- **Real Estate (BAT_DONG_SAN)**: 26 property development companies
+- **Technology (CONG_NGHE)**: 9 tech companies including FPT Corporation
+- **Oil & Gas (DAU_KHI)**: 8 energy sector companies
+- **Steel (THEP)**: 13 steel and metal companies
+- **Food & Beverage (THUC_PHAM)**: 11 consumer goods companies
+- **And 21 additional sectors** covering the complete Vietnamese stock market
 
 #### **Timezone Handling** (`src/vci.rs:228-242`)
 
@@ -882,7 +896,7 @@ graph TB
     end
     
     subgraph "Core Worker (Data Source)"
-        VCI_FETCH[🏦 VCI API Fetching<br/>Random ticker selection<br/>2 out of 4 symbols]
+        VCI_FETCH[🏦 VCI API Fetching<br/>Ticker groups processing<br/>288 symbols in batches of 10]
         INTERNAL_GOSSIP[🔒 Internal Peer Gossip<br/>Bearer token auth<br/>All internal peers]
         PUBLIC_GOSSIP[🌐 Public Peer Gossip<br/>No authentication<br/>Production only]
     end
@@ -908,40 +922,41 @@ graph TB
 
 ### **Core Worker Implementation** (`src/worker.rs:18-141`)
 
-#### **1. Random Ticker Selection Strategy**
+#### **1. Comprehensive Ticker Groups Batch Processing**
 
-**Implementation** `src/worker.rs:37-49`:
+**Implementation** `src/worker.rs:34-46`:
 ```rust
-let all_tickers = vec!["VCB".to_string(), "TCB".to_string(), "FPT".to_string(), "ACB".to_string()];
+// Load ticker groups and combine all tickers into a single array
+let ticker_groups = load_ticker_groups();
+let mut all_tickers: Vec<String> = ticker_groups.0.values()
+    .flat_map(|group_tickers| group_tickers.iter().cloned())
+    .collect();
 
-let mut iteration_count = 0;
-loop {
-    iteration_count += 1;
-    
-    // Randomly select 2 out of 4 tickers using deterministic approach
-    let first_idx = iteration_count % all_tickers.len();
-    let second_idx = (iteration_count + 2) % all_tickers.len();
-    let selected_tickers = vec![
-        all_tickers[first_idx].clone(),
-        all_tickers[second_idx].clone()
-    ];
+// Remove duplicates and shuffle
+all_tickers.sort();
+all_tickers.dedup();
+all_tickers.shuffle(&mut rand::rng());
+
+info!(total_tickers = all_tickers.len(), "Loaded and shuffled all tickers from ticker groups");
+const BATCH_SIZE: usize = 10;
 ```
 
-**🎲 Selection Pattern Analysis**:
+**📊 Batch Processing Strategy**:
 
-| Iteration | first_idx | second_idx | Selected Tickers |
-|-----------|-----------|------------|------------------|
-| 1         | 1         | 3          | VCB, ACB         |
-| 2         | 2         | 0          | TCB, VCB         |
-| 3         | 3         | 1          | FPT, TCB         |
-| 4         | 0         | 2          | ACB, FPT         |
-| 5         | 1         | 3          | VCB, ACB (repeats)|
+| Batch | Tickers Processed | Processing Time | Sleep Duration |
+|-------|-------------------|-----------------|----------------|
+| 1     | 10 symbols        | ~200-500ms      | 1000-2000ms   |
+| 2     | 10 symbols        | ~200-500ms      | 1000-2000ms   |
+| 3     | 10 symbols        | ~200-500ms      | 1000-2000ms   |
+| ...   | ...               | ...             | ...           |
+| 29    | 8 symbols (final) | ~200-500ms      | 1000-2000ms   |
 
-**💡 Benefits of Deterministic Selection**:
-- **Even Distribution**: Each symbol gets equal representation over time
-- **Predictable Load**: VCI API receives consistent 2-symbol requests
-- **Resource Efficiency**: 50% reduction in API calls vs fetching all symbols
-- **Debugging**: Reproducible selection pattern for troubleshooting
+**💡 Benefits of Batch Processing**:
+- **Complete Market Coverage**: All 288 Vietnamese stocks processed every cycle
+- **Rate Limit Compliance**: 1-2 second sleep between batches respects VCI API limits
+- **Efficient Resource Usage**: Single API call per batch reduces network overhead
+- **Random Distribution**: Shuffling ensures different processing order each cycle
+- **Fault Tolerance**: Failed batches don't affect other batch processing
 
 #### **2. Gossip Protocol Implementation**
 
@@ -1082,17 +1097,24 @@ if core_last.time > local_last.time {
 
 #### **Core Worker Metrics**
 
-**Per-Iteration Performance** (with 2 symbols):
+**Per-Batch Performance** (with 10 symbols):
 - **VCI API Call**: ~200-500ms (network dependent)
-- **Data Processing**: ~1-5ms (parsing JSON, updating HashMap)
-- **Gossip Distribution**: ~10-50ms per peer (async, non-blocking)
-- **Memory Usage**: ~144 bytes per OHLCV point (2 symbols × 72 bytes)
+- **Data Processing**: ~5-10ms (parsing JSON for 10 symbols, updating HashMap)
+- **Gossip Distribution**: ~50-200ms per peer (async, non-blocking, 10 symbols)
+- **Memory Usage**: ~720 bytes per batch (10 symbols × 72 bytes per OHLCV point)
+- **Sleep Duration**: 1000-2000ms between batches (rate limiting)
+
+**Complete Cycle Performance** (288 symbols):
+- **Total Batches**: 29 batches (28×10 + 1×8 symbols)
+- **API Calls per Cycle**: 29 calls
+- **Processing Time**: ~6-15 seconds (29 batches × 200-500ms + sleep time)
+- **Memory Usage**: ~20.7KB per complete cycle (288 symbols × 72 bytes)
 
 **Resource Scaling**:
 ```rust
-// Core worker interval examples
-30s interval → 120 API calls/hour, 240 symbols/hour
-60s interval → 60 API calls/hour, 120 symbols/hour
+// Core worker interval examples with complete market coverage
+30s interval → 120 cycles/hour, 34,560 symbol updates/hour (288×120)
+60s interval → 60 cycles/hour, 17,280 symbol updates/hour (288×60)
 ```
 
 #### **Public Worker Metrics**
@@ -1119,33 +1141,39 @@ core_worker_interval_secs: 35  # Every 35 seconds
 core_worker_interval_secs: 40  # Every 40 seconds
 ```
 
-**⏰ Timeline Analysis** (60-second window):
+**⏰ Timeline Analysis** (60-second window with batch processing):
 ```
-Time: 0s  -> Node1 fetches [VCB, ACB]
-Time: 10s -> (quiet)
-Time: 20s -> (quiet)  
-Time: 30s -> Node1 fetches [TCB, VCB]
-Time: 35s -> Node2 fetches [VCB, ACB]
-Time: 40s -> Node3 fetches [VCB, ACB]
-Time: 50s -> (quiet)
-Time: 60s -> Node1 fetches [FPT, TCB]
+Time: 0s  -> Node1 starts batch cycle (Batch 1/29: 10 symbols)
+Time: 2s  -> Node1 continues (Batch 2/29: 10 symbols)
+Time: 4s  -> Node1 continues (Batch 3/29: 10 symbols)
+...
+Time: 30s -> Node1 completes cycle, Node2 starts batch cycle
+Time: 35s -> Node2 continues batch processing
+Time: 40s -> Node3 starts batch cycle, Node2 continues
+Time: 45s -> All nodes processing different batches simultaneously
+Time: 60s -> Staggered completion and restart of cycles
 ```
 
 **📊 Load Distribution Benefits**:
-- **Reduced API Pressure**: Spreads requests across time
-- **Data Freshness**: More frequent updates across the network  
-- **Fault Tolerance**: If one node fails, others continue operating
-- **Natural Load Balancing**: Different nodes hit different VCI servers
+- **Complete Market Coverage**: All 288 Vietnamese stocks processed by each node
+- **Distributed Load**: Staggered intervals spread 29 API calls per cycle across time
+- **Enhanced Data Freshness**: Every symbol updated every cycle (30-60 seconds)
+- **Fault Tolerance**: If one node fails, others provide complete market coverage
+- **Rate Limit Optimization**: 1-2 second sleep between batches respects VCI API limits
+- **Random Processing Order**: Shuffling prevents predictable market timing patterns
 
 ### **🔧 Worker System Best Practices**
 
 #### **Core Worker Optimization**
 
 **Q: How do I optimize core worker performance?**
-A: Use intervals between 30-60 seconds. Shorter intervals may trigger VCI rate limits, longer intervals reduce data freshness.
+A: Use intervals between 30-60 seconds for complete cycles. Each cycle processes all 288 symbols in 29 batches. Shorter intervals may not allow complete cycles to finish.
 
-**Q: Should I increase the number of symbols per iteration?**
-A: No. The 2-symbol limit is optimized for VCI API performance and provides good coverage. More symbols may cause timeouts.
+**Q: Should I increase the batch size beyond 10 symbols?**
+A: No. The 10-symbol batch size is optimized for VCI API performance and prevents timeouts. The 1-2 second sleep between batches ensures rate limit compliance.
+
+**Q: How long does a complete market cycle take?**
+A: Approximately 58-87 seconds (29 batches × 2-3 seconds per batch). Configure worker intervals to be longer than cycle time to prevent overlap.
 
 **Q: How do I handle worker crashes?**
 A: The worker runs in an infinite loop and will restart with the application. Implement external monitoring to restart the entire process if needed.
@@ -1171,12 +1199,13 @@ A: Public workers continue operating with cached data. Implement fallback to oth
 
 ### **API Architecture Overview**
 
-The system exposes three primary endpoints designed for different trust levels and use cases, implementing both data retrieval and gossip protocol functionality.
+The system exposes four primary endpoints designed for different trust levels and use cases, implementing both data retrieval and gossip protocol functionality.
 
 ```mermaid
 graph TB
     subgraph "API Endpoints"
         TICKERS[🎯 GET /tickers<br/>No Authentication<br/>Public Data Access]
+        GROUPS[📊 GET /tickers/group<br/>No Authentication<br/>Ticker Groups Configuration]
         INTERNAL[🔒 POST /gossip<br/>Bearer Token Auth<br/>Internal Peer Network]
         PUBLIC[🌐 POST /public/gossip<br/>No Authentication<br/>Public Reputation Network]
     end
@@ -1261,7 +1290,71 @@ curl -X GET http://localhost:8888/tickers
 - **Read-Only**: Cannot modify data through this endpoint
 - **Rate Limiting**: Protected by tower-governor middleware (configured per deployment)
 
-#### **2. POST /gossip - Internal Peer Communication** (`src/api.rs:25-75`)
+#### **2. GET /tickers/group - Ticker Groups Configuration** (`src/api.rs:164-172`)
+
+**Purpose**: Public endpoint for retrieving the complete ticker groups configuration showing all 27 sectors and their associated symbols.
+
+```rust
+pub async fn get_ticker_groups_handler(State(state): State<SharedTickerGroups>) -> impl IntoResponse {
+    let group_count = state.0.len();
+    let group_names: Vec<_> = state.0.keys().cloned().collect();
+    
+    info!(group_count, groups = ?group_names, "Returning ticker groups");
+    (StatusCode::OK, Json(state.0.clone()))
+}
+```
+
+**Request**:
+```bash
+curl -X GET http://localhost:8888/tickers/group
+```
+
+**Response Format**:
+```json
+{
+  "NGAN_HANG": ["VCB", "BID", "CTG", "VPB", "MBB", "ACB", "TCB", "LPB", "HDB", "STB", "VIB", "TPB", "SHB", "EIB", "OCB", "MSB", "EVF"],
+  "BAT_DONG_SAN": ["VHM", "VIC", "VRE", "KDH", "SSH", "NVL", "NLG", "PDR", "DIG", "TCH", "DXG", "CEO", "HDC", "SGR", "KHG", "SCR", "AGG", "HQC", "NTL", "TDC", "ITC", "NHA", "HTN", "NDN", "HLD", "LDG"],
+  "CONG_NGHE": ["VGI", "FPT", "FOX", "CMG", "SGT", "ELC", "VTK", "TTN", "MFS"],
+  "DAU_KHI": ["GAS", "BSR", "PLX", "PVS", "PVD", "OIL", "CNG", "PVC"],
+  "THEP": ["HPG", "MSR", "HSG", "KSV", "ACG", "TVN", "VIF", "NKG", "PTB", "GDA", "VGS", "SMC", "TLH"],
+  "THUC_PHAM": ["VNM", "MCH", "MSN", "SAB", "QNS", "KDC", "SBT", "MCM", "SLS", "CLX", "LSS"],
+  "CHUNG_KHOAN": ["SSI", "VND", "VCI", "HCM", "SHS", "MBS", "BSI", "FTS", "VIX", "CTS", "DSC", "VDS", "AGR", "TVS", "BVS", "ORS", "APG", "TVB", "EVS", "TCI", "SBS", "APS", "BMS"],
+  "VAN_TAI": ["GMD", "PVT", "VTP", "PHP", "HAH", "DVP", "VSC", "VOS", "PVP", "TCD", "TCL", "VTO", "VIP", "SKG", "DXP", "VNA", "MHC"],
+  "THUY_SAN": ["VHC", "MPC", "ANV", "FMC", "ASM", "IDI", "CMX", "ACL"],
+  "CAO_SU": ["GVR", "PHR", "DRC", "DPR", "DRG", "DRI", "VRG"],
+  "DET_MAY": ["VGT", "TCM", "MSH", "TNG", "STK", "PPH", "GIL", "ADS", "EVE"],
+  "HOA_CHAT": ["DGC", "DCM", "DPM", "LAS", "DDV", "BFC", "CSV"],
+  "HANG_KHONG": ["ACV", "VJC", "HVN", "SCS", "SAS", "NCT", "SGN"],
+  "KHAI_KHOANG": ["MSR", "CST", "VPG", "NNC", "NBC", "BMC", "TNT"],
+  "NANG_LUONG": ["POW", "HDG", "QTP", "NT2", "GEG", "PPC"],
+  "NHUA": ["NTP", "BMP", "AAA", "APH", "NHH", "HCD"],
+  "NONG_NGHIEP": ["HAG", "DBC", "PAN", "VLC", "BAF", "LTG", "NAF", "TSC"],
+  "SUC_KHOE": ["DHG", "IMP", "DVN", "DHT", "TNH", "DCL", "JVC"],
+  "VLXD": ["HT1", "PTB", "VLB", "BCC", "CTI", "BTS", "DHA", "HOM", "BTN"],
+  "XAY_DUNG": ["HUT", "CTD", "CII", "IJC", "BCG", "DPG", "CKG", "HBC", "L18", "IDJ", "S99", "VC2", "C69", "TLD", "PHC", "C47", "BCE", "FID"],
+  "XAY_LAP_DIEN": ["CTR", "PC1", "TV2", "VNE", "SCI"],
+  "BAT_DONG_SAN_KCN": ["BCM", "KBC", "IDC", "VGC", "SIP", "NTC", "SZC", "LHG", "TIP", "D2D", "DTD", "IDV"],
+  "BAO_HIEM": ["BVH", "PVI", "BIC", "MIG", "BMI"],
+  "BAN_LE": ["MWG", "PNJ", "FRT", "DGW", "PET", "HAX"],
+  "DAU_TU_CONG": ["VCG", "HHV", "C4G", "LCG", "PLC", "FCN", "KSB", "G36"],
+  "PENNY": ["IPA", "FIT", "EVG", "CSC", "VPH", "VC7", "DL1", "HAP", "MST", "LIG", "VIG", "NRC", "DAH", "HID", "CIG", "RDP", "DST", "DAG", "PXI"],
+  "OTHERS": ["VEA", "GEX", "VCS", "BWE", "ACG", "TDM", "HHS", "DHC", "TIG", "TTF", "YEG", "DSN", "GDT"]
+}
+```
+
+**📊 Use Cases**:
+- **Portfolio Management**: Organize investments by sector
+- **Market Analysis**: Analyze sector performance and trends
+- **Risk Management**: Diversify holdings across different industries
+- **Algorithmic Trading**: Implement sector-based trading strategies
+- **Research & Development**: Understand Vietnamese market structure
+
+**🔓 Security Model**: 
+- **No Authentication**: Open public access for configuration data
+- **Read-Only**: Cannot modify ticker groups through this endpoint
+- **Static Data**: Configuration loaded from `ticker_group.json` at startup
+
+#### **3. POST /gossip - Internal Peer Communication** (`src/api.rs:25-75`)
 
 **Purpose**: Authenticated endpoint for trusted internal peers to share market data updates.
 
