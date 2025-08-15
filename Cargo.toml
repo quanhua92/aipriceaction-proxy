@@ -9,6 +9,7 @@ path = "examples/vci_example.rs"
 
 [dependencies]
 axum = "0.8.4"
+axum-extra = { version = "0.10.1", features = ["query"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.8"
 dotenvy = "0.15"

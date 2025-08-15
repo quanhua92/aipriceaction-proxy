@@ -6,20 +6,50 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use axum_extra::extract::Query;
+use serde::Deserialize;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{info, debug, warn, error, instrument};
 
+// Define the struct to hold the query parameters.
+// `symbol` will hold all values passed for the "symbol" key.
+#[derive(Debug, Deserialize)]
+pub struct TickerParams {
+    symbol: Option<Vec<String>>,
+}
+
 #[instrument(skip(state))]
-pub async fn get_all_tickers_handler(State(state): State<SharedData>) -> impl IntoResponse {
-    debug!("Received request for all tickers");
+pub async fn get_all_tickers_handler(
+    State(state): State<SharedData>,
+    Query(params): Query<TickerParams>
+) -> impl IntoResponse {
+    debug!("Received request for tickers with params: {:?}", params);
     
     let data = state.lock().await;
-    let symbol_count = data.len();
-    let symbols: Vec<_> = data.keys().cloned().collect();
+    
+    let filtered_data = match params.symbol {
+        Some(symbols) if !symbols.is_empty() => {
+            // Filter data to only include requested symbols
+            let mut filtered = std::collections::HashMap::new();
+            for symbol in symbols {
+                if let Some(ticker_data) = data.get(&symbol) {
+                    filtered.insert(symbol, ticker_data.clone());
+                }
+            }
+            filtered
+        }
+        _ => {
+            // Return all data if no symbols specified or empty vector
+            data.clone()
+        }
+    };
+    
+    let symbol_count = filtered_data.len();
+    let symbols: Vec<_> = filtered_data.keys().cloned().collect();
     
     info!(symbol_count, symbols = ?symbols, "Returning ticker data");
-    (StatusCode::OK, Json(data.clone()))
+    (StatusCode::OK, Json(filtered_data))
 }
 
 #[instrument(skip(data_state, token_state, last_update_state, headers), fields(symbol = %payload.symbol.as_deref().unwrap_or("unknown")))]
