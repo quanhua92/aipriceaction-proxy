@@ -10,6 +10,7 @@ use axum::{extract::FromRef, routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
+use tower_http::cors::{CorsLayer, Any};
 
 #[derive(Clone)]
 struct AppState {
@@ -115,6 +116,16 @@ async fn main() {
         GovernorConfigBuilder::default().per_second(10).burst_size(20).finish().unwrap(),
     );
 
+    // Configure CORS to allow aipriceaction.com to call api.aipriceaction.com
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "https://aipriceaction.com".parse().unwrap(),
+            "https://www.aipriceaction.com".parse().unwrap(),
+            "http://localhost:3000".parse().unwrap(), // For local development
+        ])
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/tickers", get(api::get_all_tickers_handler))
         .route("/tickers/group", get(api::get_ticker_groups_handler))
@@ -124,6 +135,7 @@ async fn main() {
             post(api::public_gossip_handler).layer(GovernorLayer::new(governor_conf)),
         )
         .route("/health", get(api::health_handler))
+        .layer(cors)
         .with_state(app_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], app_config.port));
