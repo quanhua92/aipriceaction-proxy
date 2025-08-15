@@ -183,7 +183,10 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                                 debug!(symbol, original_points = data_points, limited_points = limited_data_vec.len(), "Limited data points per symbol");
                             }
                             
-                            data_guard.insert(symbol.clone(), limited_data_vec);
+                            // Use dividend-aware deduplication instead of direct replacement
+                            let existing_entry = data_guard.entry(symbol.clone()).or_default();
+                            let added_count = crate::data_structures::merge_and_deduplicate_data(existing_entry, limited_data_vec);
+                            debug!(symbol, added_count, "Applied dividend-aware deduplication");
                             updated_symbols.push(symbol.clone());
                             debug!(symbol, data_points, date_range, "Updated symbol data with date range");
 

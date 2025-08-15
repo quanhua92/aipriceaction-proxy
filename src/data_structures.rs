@@ -86,6 +86,87 @@ pub fn cleanup_old_data(data: &mut InMemoryData) -> (usize, usize) {
     
     (cleaned_symbols, cleaned_data_points)
 }
+
+pub fn merge_and_deduplicate_data(existing_data: &mut Vec<OhlcvData>, new_data: Vec<OhlcvData>) -> usize {
+    if existing_data.is_empty() {
+        let count = new_data.len();
+        existing_data.extend(new_data);
+        existing_data.sort_by(|a, b| a.time.cmp(&b.time));
+        return count;
+    }
+    
+    if new_data.is_empty() {
+        return 0;
+    }
+    
+    // Sort both datasets by time to make comparison easier
+    existing_data.sort_by(|a, b| a.time.cmp(&b.time));
+    let mut sorted_new_data = new_data;
+    sorted_new_data.sort_by(|a, b| a.time.cmp(&b.time));
+    
+    // Find yesterday's date (most recent date before today)
+    let today = chrono::Utc::now().date_naive();
+    let yesterday = today - chrono::Duration::days(1);
+    
+    // Find yesterday's data in both existing and new datasets
+    let existing_yesterday = existing_data.iter().find(|p| p.time.date_naive() == yesterday);
+    let new_yesterday = sorted_new_data.iter().find(|p| p.time.date_naive() == yesterday);
+    
+    let dividend_detected = match (existing_yesterday, new_yesterday) {
+        (Some(existing), Some(new)) => {
+            // Compare key price fields to detect dividend (price adjustment)
+            let price_threshold = 0.001; // 0.1% threshold for price comparison
+            let close_diff = (existing.close - new.close).abs() / existing.close;
+            let open_diff = (existing.open - new.open).abs() / existing.open;
+            let high_diff = (existing.high - new.high).abs() / existing.high;
+            let low_diff = (existing.low - new.low).abs() / existing.low;
+            
+            // If any price field differs significantly, it's likely a dividend adjustment
+            close_diff > price_threshold || open_diff > price_threshold || 
+            high_diff > price_threshold || low_diff > price_threshold
+        },
+        _ => false, // If we don't have yesterday's data in both sets, assume no dividend
+    };
+    
+    let added_count = if dividend_detected {
+        // Dividend detected: completely replace existing data with new data
+        tracing::info!("Dividend detected - replacing all existing data with new data");
+        let count = sorted_new_data.len();
+        *existing_data = sorted_new_data;
+        count
+    } else {
+        // No dividend: keep existing yesterday data and append/replace today's data
+        tracing::debug!("No dividend detected - keeping existing data and updating today");
+        let mut added = 0;
+        
+        for new_point in sorted_new_data {
+            let new_date = new_point.time.date_naive();
+            
+            // Skip yesterday's data - keep existing yesterday
+            if new_date == yesterday {
+                continue;
+            }
+            
+            // For today and other dates, update or add
+            if let Some(existing_point) = existing_data.iter_mut().find(|p| p.time.date_naive() == new_date) {
+                // Update existing data point if new timestamp is more recent
+                if new_point.time > existing_point.time {
+                    *existing_point = new_point;
+                }
+            } else {
+                // Add new data point for this date
+                existing_data.push(new_point);
+                added += 1;
+            }
+        }
+        
+        // Sort by time after merging
+        existing_data.sort_by(|a, b| a.time.cmp(&b.time));
+        added
+    };
+    
+    added_count
+}
 pub type SharedData = Arc<Mutex<InMemoryData>>;
 
 // Reputation tracker for public contributors
