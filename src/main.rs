@@ -5,7 +5,7 @@ pub mod vci;
 pub mod worker;
 
 use crate::config::SharedTokenConfig;
-use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups};
+use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats, HealthStats};
 use axum::{extract::FromRef, routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
@@ -18,6 +18,7 @@ struct AppState {
     last_update: LastInternalUpdate,
     tokens: SharedTokenConfig,
     ticker_groups: SharedTickerGroups,
+    health_stats: SharedHealthStats,
 }
 
 impl FromRef<AppState> for SharedData {
@@ -50,6 +51,12 @@ impl FromRef<AppState> for SharedTickerGroups {
     }
 }
 
+impl FromRef<AppState> for SharedHealthStats {
+    fn from_ref(app_state: &AppState) -> SharedHealthStats {
+        app_state.health_stats.clone()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let app_config = config::AppConfig::load();
@@ -71,6 +78,20 @@ async fn main() {
     let last_internal_update: LastInternalUpdate = Arc::new(Mutex::new(Instant::now()));
     let shared_tokens: SharedTokenConfig = app_config.tokens.clone();
     let shared_ticker_groups: SharedTickerGroups = config::load_ticker_groups();
+    
+    // Initialize health stats with app config
+    let health_stats = HealthStats {
+        office_hours_enabled: app_config.enable_office_hours,
+        timezone: app_config.office_hours_config.default_office_hours.timezone.clone(),
+        office_start_hour: app_config.office_hours_config.default_office_hours.start_hour,
+        office_end_hour: app_config.office_hours_config.default_office_hours.end_hour,
+        environment: app_config.environment.clone(),
+        node_name: app_config.node_name.clone(),
+        internal_peers_count: app_config.internal_peers.len(),
+        public_peers_count: app_config.public_peers.len(),
+        ..HealthStats::default()
+    };
+    let shared_health_stats: SharedHealthStats = Arc::new(Mutex::new(health_stats));
 
     let app_state = AppState {
         data: shared_data.clone(),
@@ -78,12 +99,14 @@ async fn main() {
         last_update: last_internal_update,
         tokens: shared_tokens,
         ticker_groups: shared_ticker_groups,
+        health_stats: shared_health_stats.clone(),
     };
 
     tracing::info!("Spawning background worker");
     tokio::spawn(worker::run(
         shared_data.clone(),
         app_config.clone(),
+        shared_health_stats.clone(),
     ));
 
     let governor_conf = Arc::new(
@@ -98,6 +121,7 @@ async fn main() {
             "/public/gossip",
             post(api::public_gossip_handler).layer(GovernorLayer::new(governor_conf)),
         )
+        .route("/health", get(api::health_handler))
         .with_state(app_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], app_config.port));

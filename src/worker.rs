@@ -1,25 +1,26 @@
 use crate::config::{AppConfig, load_ticker_groups};
-use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval};
+use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info};
 use std::time::Duration;
 use std::sync::Arc;
 use reqwest::Client as ReqwestClient;
 use rand::prelude::SliceRandom;
 use tokio::sync::Mutex;
+use chrono::Utc;
 use tracing::{info, debug, warn, error, instrument};
 
-#[instrument(skip(data, config))]
-pub async fn run(data: SharedData, config: AppConfig) {
+#[instrument(skip(data, config, health_stats))]
+pub async fn run(data: SharedData, config: AppConfig, health_stats: SharedHealthStats) {
     if let Some(core_url) = &config.core_network_url {
         info!(%core_url, "Starting as public node worker");
-        run_public_node_worker(data, core_url.clone(), config.public_refresh_interval).await;
+        run_public_node_worker(data, core_url.clone(), config.public_refresh_interval, health_stats).await;
     } else {
         info!(environment = %config.environment, "Starting as core node worker");
-        run_core_node_worker(data, config).await;
+        run_core_node_worker(data, config, health_stats).await;
     }
 }
 
-#[instrument(skip(data, config))]
-async fn run_core_node_worker(data: SharedData, config: AppConfig) {
+#[instrument(skip(data, config, health_stats))]
+async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats: SharedHealthStats) {
     info!("Initializing core node worker");
     
     // Initialize office hours state
@@ -63,6 +64,7 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
     let gossip_client = ReqwestClient::new();
     const BATCH_SIZE: usize = 10;
     let mut iteration_count = 0;
+    let start_time = std::time::Instant::now();
 
     loop {
         iteration_count += 1;
@@ -92,6 +94,25 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                     "Office hours status changed"
                 );
             }
+        }
+        
+        // Update health stats
+        {
+            let mut health = health_stats.lock().await;
+            let data_guard = data.lock().await;
+            let (current_time, debug_override) = get_time_info();
+            
+            health.is_office_hours = is_office_hours;
+            health.current_interval_secs = current_interval.as_secs();
+            health.iteration_count = iteration_count;
+            health.uptime_secs = start_time.elapsed().as_secs();
+            health.total_tickers_count = all_tickers.len();
+            health.active_tickers_count = data_guard.len();
+            health.last_update_timestamp = Some(Utc::now().to_rfc3339());
+            health.current_system_time = current_time;
+            health.debug_time_override = debug_override;
+            
+            drop(data_guard);
         }
         
         debug!(
@@ -225,8 +246,8 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
     }
 }
 
-#[instrument(skip(data), fields(core_url = %core_network_url, refresh_interval = ?refresh_interval))]
-async fn run_public_node_worker(data: SharedData, core_network_url: String, refresh_interval: Duration) {
+#[instrument(skip(data, health_stats), fields(core_url = %core_network_url, refresh_interval = ?refresh_interval))]
+async fn run_public_node_worker(data: SharedData, core_network_url: String, refresh_interval: Duration, health_stats: SharedHealthStats) {
     info!("Initializing public node worker");
     let http_client = ReqwestClient::new();
     let mut iteration_count = 0;

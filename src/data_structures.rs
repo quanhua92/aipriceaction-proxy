@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use chrono::{Datelike, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
 use chrono_tz::Tz;
 
 // --- Core Data Structures ---
@@ -69,6 +69,112 @@ impl Default for OfficeHoursState {
 
 pub type SharedOfficeHoursState = Arc<Mutex<OfficeHoursState>>;
 
+// --- Health Statistics ---
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HealthStats {
+    // Office hours info
+    pub is_office_hours: bool,
+    pub current_interval_secs: u64,
+    pub office_hours_enabled: bool,
+    pub timezone: String,
+    pub office_start_hour: u32,
+    pub office_end_hour: u32,
+    
+    // System info
+    pub environment: String,
+    pub node_name: String,
+    pub uptime_secs: u64,
+    
+    // Ticker statistics
+    pub total_tickers_count: usize,
+    pub active_tickers_count: usize,
+    
+    // Peer counts (safe - no addresses)
+    pub internal_peers_count: usize,
+    pub public_peers_count: usize,
+    
+    // Worker statistics
+    pub iteration_count: u64,
+    pub last_update_timestamp: Option<String>, // ISO format
+    
+    // Debug info
+    pub current_system_time: String, // Current system time (ISO format)
+    pub debug_time_override: Option<String>, // Debug time override if set
+}
+
+impl Default for HealthStats {
+    fn default() -> Self {
+        Self {
+            is_office_hours: false,
+            current_interval_secs: 300,
+            office_hours_enabled: true,
+            timezone: "Asia/Ho_Chi_Minh".to_string(),
+            office_start_hour: 9,
+            office_end_hour: 16,
+            environment: "development".to_string(),
+            node_name: "aipriceaction-proxy".to_string(),
+            uptime_secs: 0,
+            total_tickers_count: 0,
+            active_tickers_count: 0,
+            internal_peers_count: 0,
+            public_peers_count: 0,
+            iteration_count: 0,
+            last_update_timestamp: None,
+            current_system_time: Utc::now().to_rfc3339(),
+            debug_time_override: None,
+        }
+    }
+}
+
+pub type SharedHealthStats = Arc<Mutex<HealthStats>>;
+
+// --- Time Functions ---
+
+/// Get the current time, potentially overridden for debugging
+/// This is the single method used throughout the system for time operations
+pub fn get_current_time() -> DateTime<Utc> {
+    if let Ok(debug_time_str) = std::env::var("DEBUG_SYSTEM_TIME") {
+        // Only allow debug time override in non-production environments
+        let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
+        
+        if environment != "production" {
+            if let Ok(debug_time) = chrono::DateTime::parse_from_rfc3339(&debug_time_str) {
+                tracing::warn!(
+                    debug_time = %debug_time,
+                    environment = %environment,
+                    "⚠️  DEBUG TIME OVERRIDE ACTIVE - Using custom time instead of system time! ⚠️"
+                );
+                return debug_time.with_timezone(&Utc);
+            } else {
+                tracing::error!(
+                    debug_time_str = %debug_time_str,
+                    "Invalid DEBUG_SYSTEM_TIME format, falling back to system time. Expected RFC3339 format."
+                );
+            }
+        } else {
+            tracing::warn!(
+                environment = %environment,
+                "DEBUG_SYSTEM_TIME ignored in production environment"
+            );
+        }
+    }
+    
+    Utc::now()
+}
+
+/// Get time info for health endpoint and other uses
+pub fn get_time_info() -> (String, Option<String>) {
+    let current_time = get_current_time();
+    let debug_override = std::env::var("DEBUG_SYSTEM_TIME").ok()
+        .filter(|_| {
+            let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
+            environment != "production"
+        });
+    
+    (current_time.to_rfc3339(), debug_override)
+}
+
 // --- Ticker Groups ---
 
 // Ticker groups loaded from JSON file
@@ -91,8 +197,8 @@ pub fn is_within_office_hours(config: &OfficeHoursConfig) -> bool {
         }
     };
 
-    // Get current time in the specified timezone
-    let now_utc = Utc::now();
+    // Get current time (potentially debug-overridden) in the specified timezone
+    let now_utc = get_current_time();
     let now_local = now_utc.with_timezone(&tz);
     
     // Check weekday if weekdays_only is true

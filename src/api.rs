@@ -1,5 +1,5 @@
 use crate::config::SharedTokenConfig;
-use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups};
+use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats};
 use crate::vci::OhlcvData;
 use axum::{
     extract::{ConnectInfo, State, Json},
@@ -169,4 +169,22 @@ pub async fn get_ticker_groups_handler(State(state): State<SharedTickerGroups>) 
     
     info!(group_count, groups = ?group_names, "Returning ticker groups");
     (StatusCode::OK, Json(state.0.clone()))
+}
+
+#[instrument(skip(state))]
+pub async fn health_handler(State(state): State<SharedHealthStats>) -> impl IntoResponse {
+    debug!("Received request for health stats");
+    
+    let health_stats = state.lock().await.clone();
+    
+    info!(
+        is_office_hours = health_stats.is_office_hours,
+        current_interval_secs = health_stats.current_interval_secs,
+        active_tickers = health_stats.active_tickers_count,
+        total_tickers = health_stats.total_tickers_count,
+        iteration_count = health_stats.iteration_count,
+        "Returning health stats"
+    );
+    
+    (StatusCode::OK, Json(health_stats))
 }
