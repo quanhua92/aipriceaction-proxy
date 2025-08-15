@@ -11,12 +11,15 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{info, debug, warn, error, instrument};
+use chrono::NaiveDate;
 
 // Define the struct to hold the query parameters.
 // `symbol` will hold all values passed for the "symbol" key.
 #[derive(Debug, Deserialize)]
 pub struct TickerParams {
     symbol: Option<Vec<String>>,
+    start_date: Option<String>,
+    end_date: Option<String>,
 }
 
 #[instrument(skip(state))]
@@ -28,7 +31,38 @@ pub async fn get_all_tickers_handler(
     
     let data = state.lock().await;
     
-    let filtered_data = match params.symbol {
+    // Parse date filters
+    let start_date_filter = match &params.start_date {
+        Some(date_str) => {
+            match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                Ok(date) => Some(date.and_hms_opt(0, 0, 0).unwrap().and_utc()),
+                Err(_) => {
+                    warn!(start_date = %date_str, "Invalid start_date format, expected YYYY-MM-DD");
+                    return (StatusCode::BAD_REQUEST, Json("Invalid start_date format. Expected YYYY-MM-DD")).into_response();
+                }
+            }
+        }
+        None => None,
+    };
+
+    let end_date_filter = match &params.end_date {
+        Some(date_str) => {
+            match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                Ok(date) => Some(date.and_hms_opt(23, 59, 59).unwrap().and_utc()),
+                Err(_) => {
+                    warn!(end_date = %date_str, "Invalid end_date format, expected YYYY-MM-DD");
+                    return (StatusCode::BAD_REQUEST, Json("Invalid end_date format. Expected YYYY-MM-DD")).into_response();
+                }
+            }
+        }
+        None => None,
+    };
+
+    // If no date filters provided, default to last day only
+    let use_last_day_only = start_date_filter.is_none() && end_date_filter.is_none();
+    
+    // Filter data by symbols first
+    let symbol_filtered_data = match params.symbol {
         Some(symbols) if !symbols.is_empty() => {
             // Filter data to only include requested symbols
             let mut filtered = std::collections::HashMap::new();
@@ -44,12 +78,40 @@ pub async fn get_all_tickers_handler(
             data.clone()
         }
     };
+
+    // Apply date filtering
+    let mut date_filtered_data = std::collections::HashMap::new();
+    for (symbol, ticker_data) in symbol_filtered_data {
+        let filtered_data: Vec<_> = if use_last_day_only {
+            // Return only the most recent data point
+            ticker_data.into_iter().rev().take(1).collect()
+        } else {
+            // Filter by date range
+            ticker_data.into_iter()
+                .filter(|ohlcv| {
+                    let time_matches_start = start_date_filter.map_or(true, |start| ohlcv.time >= start);
+                    let time_matches_end = end_date_filter.map_or(true, |end| ohlcv.time <= end);
+                    time_matches_start && time_matches_end
+                })
+                .collect()
+        };
+        
+        if !filtered_data.is_empty() {
+            date_filtered_data.insert(symbol, filtered_data);
+        }
+    }
     
-    let symbol_count = filtered_data.len();
-    let symbols: Vec<_> = filtered_data.keys().cloned().collect();
+    let symbol_count = date_filtered_data.len();
+    let symbols: Vec<_> = date_filtered_data.keys().cloned().collect();
+    let total_data_points: usize = date_filtered_data.values().map(|v| v.len()).sum();
     
-    info!(symbol_count, symbols = ?symbols, "Returning ticker data");
-    (StatusCode::OK, Json(filtered_data))
+    if use_last_day_only {
+        info!(symbol_count, symbols = ?symbols, total_data_points, "Returning ticker data (last day only)");
+    } else {
+        info!(symbol_count, symbols = ?symbols, total_data_points, start_date = ?params.start_date, end_date = ?params.end_date, "Returning ticker data with date filters");
+    }
+    
+    (StatusCode::OK, Json(date_filtered_data)).into_response()
 }
 
 #[instrument(skip(data_state, token_state, last_update_state, headers), fields(symbol = %payload.symbol.as_deref().unwrap_or("unknown")))]
