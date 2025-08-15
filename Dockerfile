@@ -54,12 +54,6 @@ FROM chef AS rust-builder
 WORKDIR /app
 ARG TARGETPLATFORM
 
-# Copy cached dependencies and workspace structure
-COPY --from=rust-cacher /app/target target
-COPY ./Cargo.lock ./Cargo.lock
-COPY ./Cargo.toml ./Cargo.toml
-COPY ./src ./src
-
 # Add Alpine build dependencies for this stage
 RUN apk add --no-cache \
     musl-dev \
@@ -69,6 +63,12 @@ RUN apk add --no-cache \
     gcc \
     g++ \
     make
+
+# Copy cached dependencies and workspace structure
+COPY --from=rust-cacher /app/target target
+COPY ./Cargo.lock ./Cargo.lock
+COPY ./Cargo.toml ./Cargo.toml
+COPY ./src ./src
 
 # Build for native musl target
 RUN echo "Building binary for native musl target" && \
