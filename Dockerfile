@@ -80,8 +80,8 @@ RUN echo "Building binary for native musl target" && \
 FROM alpine:3.22 AS final-image
 WORKDIR /app
 
-# Install ca-certificates for HTTPS requests
-RUN apk add --no-cache ca-certificates
+# Install ca-certificates and curl for HTTPS requests and health checks
+RUN apk add --no-cache ca-certificates curl
 
 # Create non-root user for security
 RUN addgroup -S appgroup && adduser -S -G appgroup appuser

@@ -3,7 +3,7 @@ services:
   node1:
     build:
       context: .
-      dockerfile: Dockerfile.simple
+      dockerfile: Dockerfile
     container_name: aipriceaction-node1
     ports:
       - "8888:8888"
@@ -16,7 +16,7 @@ services:
     networks:
       - aipriceaction-test
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8888/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8888/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -26,7 +26,7 @@ services:
   node2:
     build:
       context: .
-      dockerfile: Dockerfile.simple
+      dockerfile: Dockerfile
     container_name: aipriceaction-node2
     ports:
       - "8889:8889"
@@ -39,7 +39,7 @@ services:
     networks:
       - aipriceaction-test
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8889/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8889/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -52,7 +52,7 @@ services:
   node3:
     build:
       context: .
-      dockerfile: Dockerfile.simple
+      dockerfile: Dockerfile
     container_name: aipriceaction-node3
     ports:
       - "8890:8890"
@@ -65,7 +65,7 @@ services:
     networks:
       - aipriceaction-test
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8890/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8890/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -12,7 +12,7 @@ aipriceaction-proxy is a sophisticated distributed system designed to efficientl
 ```mermaid
 graph TB
     subgraph "VCI API"
-        VCI[Vietnamese Capital Market API<br/>288 symbols across 27 sectors<br/>Banking, Real Estate, Technology, etc.]
+        VCI[Vietnamese Capital Market API<br/>291 symbols across 27 sectors<br/>Banking, Real Estate, Technology, etc.]
     end
     
     subgraph "Core Network"
@@ -73,7 +73,7 @@ graph TB
 ### **Core Design Principles**
 
 1. **Trust by Verification**: Internal peers use cryptographic tokens, public peers earn trust through consistent behavior
-2. **Efficient Resource Usage**: Batch processing (288 symbols in batches of 10) optimizes API usage while providing complete market coverage
+2. **Efficient Resource Usage**: Batch processing (291 symbols in batches of 10) optimizes API usage while providing complete market coverage
 3. **Fault Tolerance**: Multi-node deployment with automatic failover and data synchronization
 4. **Real-time Performance**: Sub-second gossip protocol for market data distribution
 5. **Security by Design**: Defense-in-depth with authentication, rate limiting, and reputation tracking
@@ -257,7 +257,7 @@ let _span = tracing::info_span!("node", name = %app_config.node_name).entered();
 
 #### **2. Shared State Management with Arc<Mutex<>>**
 ```rust
-// Lines 62-72: Thread-safe shared state pattern
+// Lines 76-78: Thread-safe shared state pattern
 let shared_data: SharedData = Arc::new(Mutex::new(InMemoryData::new()));
 let shared_reputation: SharedReputation = Arc::new(Mutex::new(PublicActorReputation::new()));
 let last_internal_update: LastInternalUpdate = Arc::new(Mutex::new(Instant::now()));
@@ -267,7 +267,7 @@ let last_internal_update: LastInternalUpdate = Arc::new(Mutex::new(Instant::now(
 
 #### **3. Axum State Management with FromRef Trait**
 ```rust
-// Lines 22-44: Type-safe state extraction
+// Lines 24-57: Type-safe state extraction
 impl FromRef<AppState> for SharedData {
     fn from_ref(app_state: &AppState) -> SharedData {
         app_state.data.clone()
@@ -313,7 +313,7 @@ pub enum ActorStatus {
 
 #### **Memory-Efficient Type Aliases**
 ```rust
-// Lines 37-45: Clear type safety with performance
+// Lines 41-46: Clear type safety with performance
 pub type InMemoryData = HashMap<String, Vec<OhlcvData>>;
 pub type SharedData = Arc<Mutex<InMemoryData>>;
 pub type PublicActorReputation = HashMap<IpAddr, ActorMetadata>;
@@ -405,7 +405,7 @@ graph LR
     style R fill:#fce4ec
 ```
 
-**Implementation in** `src/config.rs:48-55`:
+**Implementation in** `src/config.rs:91-97`:
 ```rust
 pub fn load() -> Self {
     // Check for CONFIG_FILE environment variable first
@@ -472,7 +472,7 @@ export ENVIRONMENT="production"
 
 ### **Configuration Structure Deep Dive**
 
-#### **Token Management** (`src/config.rs:8-13`)
+#### **Token Management** (`src/config.rs:11-13`)
 ```rust
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TokenConfig {
@@ -508,7 +508,7 @@ environment: "production"                    # Required for public mode
 The system provides intelligent defaults for missing configuration:
 
 ```rust
-// From src/config.rs:63-75
+// From src/config.rs:158-172
 let core_worker_interval_secs = env::var("CORE_WORKER_INTERVAL")
     .ok()
     .and_then(|s| s.parse().ok())
@@ -531,12 +531,12 @@ For production multi-node deployment, use coordinated configurations:
 graph TB
     subgraph "Node Configuration Pattern"
         N1["Node-01<br/>Port: 8888<br/>Interval: 30s<br/>Peers: [8889, 8890]"]
-        N2["Node-02<br/>Port: 8889<br/>Interval: 35s<br/>Peers: [8888, 8890]"]
-        N3["Node-03<br/>Port: 8890<br/>Interval: 40s<br/>Peers: [8888, 8889]"]
+        N2["Node-02<br/>Port: 8889<br/>Interval: 30s<br/>Peers: [8888, 8890]"]
+        N3["Node-03<br/>Port: 8890<br/>Interval: 30s<br/>Peers: [8888, 8889]"]
     end
     
     subgraph "Benefits"
-        B1["🔄 Load Distribution<br/>Different intervals spread API calls"]
+        B1["🔄 Load Distribution<br/>Multiple nodes reduce individual load"]
         B2["🌐 Full Mesh<br/>Each node connects to others"]
         B3["⚡ Fault Tolerance<br/>Redundant data paths"]
     end
@@ -562,7 +562,7 @@ graph TB
 - **Environment Separation**: Never share tokens between dev/staging/production
 
 #### **Performance Tuning**
-- **Interval Staggering**: Use different `core_worker_interval_secs` values to distribute API load
+- **Interval Configuration**: Adjust `core_worker_interval_secs` based on node workload requirements
 - **Peer Network Size**: Limit internal peers to 5-10 nodes for optimal gossip performance
 - **Port Management**: Use consistent port ranges (8888-8999) for easy firewall configuration
 
@@ -708,7 +708,7 @@ async fn make_request(&mut self, url: &str, payload: &Value) -> Result<Value, Vc
 
 ### **OHLCV Data Fetching Patterns**
 
-#### **Single Symbol Fetching** (`src/vci.rs:260-343`)
+#### **Single Symbol Fetching** (`src/vci.rs:262-346`)
 
 ```rust
 pub async fn get_history(
@@ -725,7 +725,7 @@ pub async fn get_history(
 - **Hourly**: `1H` → `ONE_HOUR` API parameter  
 - **Daily/Weekly/Monthly**: `1D`, `1W`, `1M` → `ONE_DAY` API parameter
 
-#### **Batch Symbol Fetching** (`src/vci.rs:345-448`)
+#### **Batch Symbol Fetching** (`src/vci.rs:347-475`)
 
 ```rust
 pub async fn get_batch_history(
@@ -773,7 +773,7 @@ sequenceDiagram
 
 #### **Comprehensive Vietnamese Stock Market Coverage**
 
-The system now supports the complete Vietnamese stock market through a comprehensive ticker group system with **288 symbols across 27 sectors**.
+The system now supports the complete Vietnamese stock market through a comprehensive ticker group system with **291 symbols across 27 sectors**.
 
 **Ticker Groups Configuration** (`ticker_group.json`):
 ```json
@@ -820,7 +820,7 @@ pub fn calculate_timestamp(&self, date_str: Option<&str>) -> i64 {
 
 ### **Company Information via GraphQL**
 
-#### **GraphQL Integration** (`src/vci.rs:450-631`)
+#### **GraphQL Integration** (`src/vci.rs:476-659`)
 
 The VCI client also supports fetching comprehensive company information through a GraphQL endpoint:
 
@@ -870,7 +870,7 @@ A: The client automatically handles rate limiting with intelligent backoff. For 
 A: The batch fetching method returns `None` for symbols with missing/invalid data, allowing the application to continue processing valid symbols while logging issues.
 
 **Q: How do I optimize for Vietnamese market hours?**
-A: Vietnamese markets operate 9:00-15:00 ICT (UTC+7). Schedule intensive data fetching during off-market hours (16:00-08:00 ICT) to reduce load on VCI servers.
+A: Vietnamese markets operate 9:00-16:00 ICT (UTC+7). Schedule intensive data fetching during off-market hours (17:00-08:00 ICT) to reduce load on VCI servers.
 
 #### **Production Deployment Tips**
 
@@ -896,7 +896,7 @@ graph TB
     end
     
     subgraph "Core Worker (Data Source)"
-        VCI_FETCH[🏦 VCI API Fetching<br/>Ticker groups processing<br/>288 symbols in batches of 10]
+        VCI_FETCH[🏦 VCI API Fetching<br/>Ticker groups processing<br/>291 symbols in batches of 10]
         INTERNAL_GOSSIP[🔒 Internal Peer Gossip<br/>Bearer token auth<br/>All internal peers]
         PUBLIC_GOSSIP[🌐 Public Peer Gossip<br/>No authentication<br/>Production only]
     end
@@ -920,11 +920,11 @@ graph TB
     style CORE_SYNC fill:#f3e5f5
 ```
 
-### **Core Worker Implementation** (`src/worker.rs:18-141`)
+### **Core Worker Implementation** (`src/worker.rs:23-247`)
 
 #### **1. Comprehensive Ticker Groups Batch Processing**
 
-**Implementation** `src/worker.rs:34-46`:
+**Implementation** `src/worker.rs:50-65`:
 ```rust
 // Load ticker groups and combine all tickers into a single array
 let ticker_groups = load_ticker_groups();
@@ -949,10 +949,10 @@ const BATCH_SIZE: usize = 10;
 | 2     | 10 symbols        | ~200-500ms      | 1000-2000ms   |
 | 3     | 10 symbols        | ~200-500ms      | 1000-2000ms   |
 | ...   | ...               | ...             | ...           |
-| 29    | 8 symbols (final) | ~200-500ms      | 1000-2000ms   |
+| 30    | 1 symbol (final)  | ~200-500ms      | 1000-2000ms   |
 
 **💡 Benefits of Batch Processing**:
-- **Complete Market Coverage**: All 288 Vietnamese stocks processed every cycle
+- **Complete Market Coverage**: All 291 Vietnamese stocks processed every cycle
 - **Rate Limit Compliance**: 1-2 second sleep between batches respects VCI API limits
 - **Efficient Resource Usage**: Single API call per batch reduces network overhead
 - **Random Distribution**: Shuffling ensures different processing order each cycle
@@ -960,7 +960,7 @@ const BATCH_SIZE: usize = 10;
 
 #### **2. Gossip Protocol Implementation**
 
-**Dual-Network Broadcasting** `src/worker.rs:67-124`:
+**Dual-Network Broadcasting** `src/worker.rs:147-191`:
 
 ```rust
 if let Some(gossip_payload) = latest_data {
@@ -1036,11 +1036,11 @@ sequenceDiagram
 - **Isolation**: Individual peer failures don't affect other distributions
 - **Resource Efficiency**: Tokio efficiently manages hundreds of concurrent tasks
 
-### **Public Worker Implementation** (`src/worker.rs:143-201`)
+### **Public Worker Implementation** (`src/worker.rs:250-306`)
 
 #### **1. Core Network Synchronization**
 
-**Implementation** `src/worker.rs:149-196`:
+**Implementation** `src/worker.rs:250-306`:
 ```rust
 async fn run_public_node_worker(data: SharedData, core_network_url: String, refresh_interval: Duration) {
     let http_client = ReqwestClient::new();
@@ -1104,17 +1104,17 @@ if core_last.time > local_last.time {
 - **Memory Usage**: ~720 bytes per batch (10 symbols × 72 bytes per OHLCV point)
 - **Sleep Duration**: 1000-2000ms between batches (rate limiting)
 
-**Complete Cycle Performance** (288 symbols):
-- **Total Batches**: 29 batches (28×10 + 1×8 symbols)
-- **API Calls per Cycle**: 29 calls
-- **Processing Time**: ~6-15 seconds (29 batches × 200-500ms + sleep time)
-- **Memory Usage**: ~20.7KB per complete cycle (288 symbols × 72 bytes)
+**Complete Cycle Performance** (291 symbols):
+- **Total Batches**: 30 batches (29×10 + 1×1 symbols)
+- **API Calls per Cycle**: 30 calls
+- **Processing Time**: ~6-15 seconds (30 batches × 200-500ms + sleep time)
+- **Memory Usage**: ~20.9KB per complete cycle (291 symbols × 72 bytes)
 
 **Resource Scaling**:
 ```rust
 // Core worker interval examples with complete market coverage
-30s interval → 120 cycles/hour, 34,560 symbol updates/hour (288×120)
-60s interval → 60 cycles/hour, 17,280 symbol updates/hour (288×60)
+30s interval → 120 cycles/hour, 34,920 symbol updates/hour (291×120)
+60s interval → 60 cycles/hour, 17,460 symbol updates/hour (291×60)
 ```
 
 #### **Public Worker Metrics**
@@ -1135,28 +1135,26 @@ if core_last.time > local_last.time {
 core_worker_interval_secs: 30  # Every 30 seconds
 
 # Node 2  
-core_worker_interval_secs: 35  # Every 35 seconds
+core_worker_interval_secs: 30  # Every 30 seconds
 
 # Node 3
-core_worker_interval_secs: 40  # Every 40 seconds
+core_worker_interval_secs: 30  # Every 30 seconds
 ```
 
-**⏰ Timeline Analysis** (60-second window with batch processing):
+**⏰ Timeline Analysis** (60-second window with synchronized processing):
 ```
-Time: 0s  -> Node1 starts batch cycle (Batch 1/29: 10 symbols)
-Time: 2s  -> Node1 continues (Batch 2/29: 10 symbols)
-Time: 4s  -> Node1 continues (Batch 3/29: 10 symbols)
+Time: 0s  -> All nodes start batch cycle (Batch 1/30: 10 symbols each)
+Time: 2s  -> All nodes continue (Batch 2/30: 10 symbols each)
+Time: 4s  -> All nodes continue (Batch 3/30: 10 symbols each)
 ...
-Time: 30s -> Node1 completes cycle, Node2 starts batch cycle
-Time: 35s -> Node2 continues batch processing
-Time: 40s -> Node3 starts batch cycle, Node2 continues
-Time: 45s -> All nodes processing different batches simultaneously
-Time: 60s -> Staggered completion and restart of cycles
+Time: 30s -> All nodes complete cycle and immediately restart
+Time: 32s -> All nodes processing (Batch 2/30 of new cycle)
+Time: 60s -> All nodes complete second cycle and restart
 ```
 
 **📊 Load Distribution Benefits**:
-- **Complete Market Coverage**: All 288 Vietnamese stocks processed by each node
-- **Distributed Load**: Staggered intervals spread 29 API calls per cycle across time
+- **Complete Market Coverage**: All 291 Vietnamese stocks processed by each node
+- **Distributed Load**: Multiple nodes provide redundancy with synchronized 30 API calls per cycle
 - **Enhanced Data Freshness**: Every symbol updated every cycle (30-60 seconds)
 - **Fault Tolerance**: If one node fails, others provide complete market coverage
 - **Rate Limit Optimization**: 1-2 second sleep between batches respects VCI API limits
@@ -1167,7 +1165,7 @@ Time: 60s -> Staggered completion and restart of cycles
 #### **Core Worker Optimization**
 
 **Q: How do I optimize core worker performance?**
-A: Use intervals between 30-60 seconds for complete cycles. Each cycle processes all 288 symbols in 29 batches. Shorter intervals may not allow complete cycles to finish.
+A: Use intervals between 30-60 seconds for complete cycles. Each cycle processes all 291 symbols in 30 batches. Shorter intervals may not allow complete cycles to finish.
 
 **Q: Should I increase the batch size beyond 10 symbols?**
 A: No. The 10-symbol batch size is optimized for VCI API performance and prevents timeouts. The 1-2 second sleep between batches ensures rate limit compliance.
