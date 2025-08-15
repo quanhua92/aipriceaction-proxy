@@ -1,3 +1,4 @@
+use crate::data_structures::{SharedTickerGroups, TickerGroups};
 use std::env;
 use std::fs;
 use std::sync::Arc;
@@ -137,4 +138,21 @@ impl AppConfig {
             port,
         }
     }
+}
+
+/// Load ticker groups from ticker_group.json file
+pub fn load_ticker_groups() -> SharedTickerGroups {
+    let ticker_group_path = "ticker_group.json";
+    
+    tracing::info!("Loading ticker groups from: {}", ticker_group_path);
+    
+    let json_content = fs::read_to_string(ticker_group_path)
+        .unwrap_or_else(|e| panic!("Failed to read ticker_group.json: {}", e));
+    
+    let ticker_groups: TickerGroups = serde_json::from_str(&json_content)
+        .unwrap_or_else(|e| panic!("Failed to parse ticker_group.json: {}", e));
+    
+    tracing::info!("Successfully loaded {} ticker groups", ticker_groups.0.len());
+    
+    Arc::new(ticker_groups)
 }

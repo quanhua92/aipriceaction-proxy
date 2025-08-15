@@ -1,5 +1,5 @@
 use crate::config::SharedTokenConfig;
-use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation};
+use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups};
 use crate::vci::OhlcvData;
 use axum::{
     extract::{ConnectInfo, State, Json},
@@ -158,4 +158,15 @@ pub async fn public_gossip_handler(
     }
 
     (StatusCode::OK, "OK").into_response()
+}
+
+#[instrument(skip(state))]
+pub async fn get_ticker_groups_handler(State(state): State<SharedTickerGroups>) -> impl IntoResponse {
+    debug!("Received request for ticker groups");
+    
+    let group_count = state.0.len();
+    let group_names: Vec<_> = state.0.keys().cloned().collect();
+    
+    info!(group_count, groups = ?group_names, "Returning ticker groups");
+    (StatusCode::OK, Json(state.0.clone()))
 }

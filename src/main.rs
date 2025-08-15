@@ -5,7 +5,7 @@ pub mod vci;
 pub mod worker;
 
 use crate::config::SharedTokenConfig;
-use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation};
+use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups};
 use axum::{extract::FromRef, routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
@@ -17,6 +17,7 @@ struct AppState {
     reputation: SharedReputation,
     last_update: LastInternalUpdate,
     tokens: SharedTokenConfig,
+    ticker_groups: SharedTickerGroups,
 }
 
 impl FromRef<AppState> for SharedData {
@@ -43,6 +44,12 @@ impl FromRef<AppState> for SharedTokenConfig {
     }
 }
 
+impl FromRef<AppState> for SharedTickerGroups {
+    fn from_ref(app_state: &AppState) -> SharedTickerGroups {
+        app_state.ticker_groups.clone()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let app_config = config::AppConfig::load();
@@ -63,12 +70,14 @@ async fn main() {
     let shared_reputation: SharedReputation = Arc::new(Mutex::new(PublicActorReputation::new()));
     let last_internal_update: LastInternalUpdate = Arc::new(Mutex::new(Instant::now()));
     let shared_tokens: SharedTokenConfig = app_config.tokens.clone();
+    let shared_ticker_groups: SharedTickerGroups = config::load_ticker_groups();
 
     let app_state = AppState {
         data: shared_data.clone(),
         reputation: shared_reputation,
         last_update: last_internal_update,
         tokens: shared_tokens,
+        ticker_groups: shared_ticker_groups,
     };
 
     tracing::info!("Spawning background worker");
@@ -83,6 +92,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/tickers", get(api::get_all_tickers_handler))
+        .route("/tickers/group", get(api::get_ticker_groups_handler))
         .route("/gossip", post(api::internal_gossip_handler))
         .route(
             "/public/gossip",

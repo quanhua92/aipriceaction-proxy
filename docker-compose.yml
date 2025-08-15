@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # Single node deployment
+  aipriceaction-proxy:
+    build: .
+    container_name: aipriceaction-proxy
+    ports:
+      - "8888:8888"
+    environment:
+      - NODE_NAME=aipriceaction-proxy-docker
+      - PRIMARY_TOKEN=docker-primary-token-12345
+      - SECONDARY_TOKEN=docker-secondary-token-67890
+      - INTERNAL_PEER_URLS=
+      - PUBLIC_PEER_URLS=https://api.aipriceaction.com
+      - PUBLIC_REFRESH_INTERVAL=300
+      - CORE_WORKER_INTERVAL=30
+      - ENVIRONMENT=development
+      - PORT=8888
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8888/tickers"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Multi-node cluster deployment (commented out by default)
+  # Uncomment to run a 3-node cluster
+  
+  # node-01:
+  #   build: .
+  #   container_name: aipriceaction-node-01
+  #   ports:
+  #     - "8888:8888"
+  #   volumes:
+  #     - ./examples/configs/node1.yml:/app/config.yml:ro
+  #   environment:
+  #     - CONFIG_FILE=/app/config.yml
+  #     - RUST_LOG=info
+  #   restart: unless-stopped
+  #   networks:
+  #     - aipriceaction-network
+
+  # node-02:
+  #   build: .
+  #   container_name: aipriceaction-node-02
+  #   ports:
+  #     - "8889:8889"
+  #   volumes:
+  #     - ./examples/configs/node2.yml:/app/config.yml:ro
+  #   environment:
+  #     - CONFIG_FILE=/app/config.yml
+  #     - RUST_LOG=info
+  #   restart: unless-stopped
+  #   networks:
+  #     - aipriceaction-network
+  #   depends_on:
+  #     - node-01
+
+  # node-03:
+  #   build: .
+  #   container_name: aipriceaction-node-03
+  #   ports:
+  #     - "8890:8890"
+  #   volumes:
+  #     - ./examples/configs/node3.yml:/app/config.yml:ro
+  #   environment:
+  #     - CONFIG_FILE=/app/config.yml
+  #     - RUST_LOG=info
+  #   restart: unless-stopped
+  #   networks:
+  #     - aipriceaction-network
+  #   depends_on:
+  #     - node-01
+  #     - node-02
+
+# networks:
+#   aipriceaction-network:
+#     driver: bridge

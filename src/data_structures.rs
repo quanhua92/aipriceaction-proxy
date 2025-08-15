@@ -1,4 +1,5 @@
 use crate::vci::OhlcvData;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -43,3 +44,11 @@ pub type SharedReputation = Arc<Mutex<PublicActorReputation>>;
 
 // Timestamp of the last trusted internal update
 pub type LastInternalUpdate = Arc<Mutex<Instant>>;
+
+// --- Ticker Groups ---
+
+// Ticker groups loaded from JSON file
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TickerGroups(pub HashMap<String, Vec<String>>);
+
+pub type SharedTickerGroups = Arc<TickerGroups>;
