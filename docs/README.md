@@ -622,7 +622,7 @@ graph TB
 
 #### **1. Client Initialization with Anti-Detection**
 
-**Implementation** `src/vci.rs:94-115`:
+**Implementation** `src/vci.rs:94-121`:
 ```rust
 pub fn new(random_agent: bool, rate_limit_per_minute: u32) -> Result<Self, VciError> {
     let client = Client::builder()
@@ -638,7 +638,7 @@ pub fn new(random_agent: bool, rate_limit_per_minute: u32) -> Result<Self, VciEr
 
 **💡 Anti-Detection Strategy**: The client rotates between 5 realistic browser user agents to appear as normal web traffic rather than automated requests.
 
-#### **2. Intelligent Rate Limiting** (`src/vci.rs:145-164`)
+#### **2. Intelligent Rate Limiting** (`src/vci.rs:151-169`)
 
 ```rust
 async fn enforce_rate_limit(&mut self) {
@@ -672,7 +672,7 @@ async fn enforce_rate_limit(&mut self) {
 
 #### **3. Robust Error Handling with Exponential Backoff**
 
-**Implementation** `src/vci.rs:166-226`:
+**Implementation** `src/vci.rs:172-232`:
 ```rust
 async fn make_request(&mut self, url: &str, payload: &Value) -> Result<Value, VciError> {
     const MAX_RETRIES: u32 = 5;
@@ -708,7 +708,7 @@ async fn make_request(&mut self, url: &str, payload: &Value) -> Result<Value, Vc
 
 ### **OHLCV Data Fetching Patterns**
 
-#### **Single Symbol Fetching** (`src/vci.rs:262-346`)
+#### **Single Symbol Fetching** (`src/vci.rs:268-357`)
 
 ```rust
 pub async fn get_history(
@@ -725,7 +725,7 @@ pub async fn get_history(
 - **Hourly**: `1H` → `ONE_HOUR` API parameter  
 - **Daily/Weekly/Monthly**: `1D`, `1W`, `1M` → `ONE_DAY` API parameter
 
-#### **Batch Symbol Fetching** (`src/vci.rs:347-475`)
+#### **Batch Symbol Fetching** (`src/vci.rs:359-494`)
 
 ```rust
 pub async fn get_batch_history(
@@ -796,7 +796,7 @@ The system now supports the complete Vietnamese stock market through a comprehen
 - **Food & Beverage (THUC_PHAM)**: 11 consumer goods companies
 - **And 21 additional sectors** covering the complete Vietnamese stock market
 
-#### **Timezone Handling** (`src/vci.rs:228-242`)
+#### **Timezone Handling** (`src/vci.rs:234-248`)
 
 ```rust
 pub fn calculate_timestamp(&self, date_str: Option<&str>) -> i64 {
@@ -820,7 +820,7 @@ pub fn calculate_timestamp(&self, date_str: Option<&str>) -> i64 {
 
 ### **Company Information via GraphQL**
 
-#### **GraphQL Integration** (`src/vci.rs:476-659`)
+#### **GraphQL Integration** (`src/vci.rs:496-679`)
 
 The VCI client also supports fetching comprehensive company information through a GraphQL endpoint:
 
