@@ -1,5 +1,5 @@
 use crate::config::{AppConfig, load_ticker_groups};
-use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info};
+use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info, get_current_time};
 use std::time::Duration;
 use std::sync::Arc;
 use reqwest::Client as ReqwestClient;
@@ -122,12 +122,24 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
             "Starting data fetch cycle"
         );
         
+        // Calculate date range for VCI API call (current date and 7 days ago)
+        let current_date = get_current_time();
+        let end_date = current_date.format("%Y-%m-%d").to_string();
+        let start_date = (current_date - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+        
+        debug!(
+            iteration = iteration_count,
+            start_date = %start_date,
+            end_date = %end_date,
+            "Using dynamic date range for VCI API calls"
+        );
+
         // Process all tickers in batches of 10
         for (batch_idx, ticker_batch) in all_tickers.chunks(BATCH_SIZE).enumerate() {
             let batch_num = batch_idx + 1;
             info!(iteration = iteration_count, batch = batch_num, batch_size = ticker_batch.len(), "Processing ticker batch");
             
-            match vci_client.get_batch_history(ticker_batch, "2025-08-14", Some("2025-08-15"), "1D").await {
+            match vci_client.get_batch_history(ticker_batch, &start_date, Some(&end_date), "1D").await {
                 Ok(batch_data) => {
                     info!(iteration = iteration_count, batch = batch_num, symbols_count = batch_data.len(), "Successfully fetched batch data from VCI");
                     
