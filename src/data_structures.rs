@@ -104,9 +104,16 @@ pub fn merge_and_deduplicate_data(existing_data: &mut Vec<OhlcvData>, new_data: 
     let mut sorted_new_data = new_data;
     sorted_new_data.sort_by(|a, b| a.time.cmp(&b.time));
     
-    // Find yesterday's date (most recent date before today)
-    let today = chrono::Utc::now().date_naive();
-    let yesterday = today - chrono::Duration::days(1);
+    // Find yesterday's date based on the most recent date in the datasets
+    let latest_date = sorted_new_data.iter()
+        .map(|p| p.time.date_naive())
+        .max()
+        .or_else(|| existing_data.iter().map(|p| p.time.date_naive()).max());
+    
+    let yesterday = match latest_date {
+        Some(latest) => latest - chrono::Duration::days(1),
+        None => return 0, // No data to work with
+    };
     
     // Find yesterday's data in both existing and new datasets
     let existing_yesterday = existing_data.iter().find(|p| p.time.date_naive() == yesterday);
@@ -147,10 +154,12 @@ pub fn merge_and_deduplicate_data(existing_data: &mut Vec<OhlcvData>, new_data: 
                 continue;
             }
             
-            // For today and other dates, update or add
+            // For latest date (today), always replace. For other dates, check timestamp
+            let is_latest_date = Some(new_date) == latest_date;
+            
             if let Some(existing_point) = existing_data.iter_mut().find(|p| p.time.date_naive() == new_date) {
-                // Update existing data point if new timestamp is more recent
-                if new_point.time > existing_point.time {
+                // Always replace if it's the latest date, or if new timestamp is more recent
+                if is_latest_date || new_point.time > existing_point.time {
                     *existing_point = new_point;
                 }
             } else {
