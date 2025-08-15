@@ -15,14 +15,35 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-TEST_DURATION=70  # Run for 70s to hit VCI API multiple times (Node1:30s interval = 2-3 API calls)
+TEST_DURATION=60  # Run for 60s - fast test with office hours enabled
 NODE_CONFIGS=("node1.yml" "node2.yml" "node3.yml")
 PORTS=(8888 8889 8890)
 VCI_SYMBOLS=("VCB" "TCB" "FPT" "ACB")
 
+# Test tracking
+TOTAL_TESTS=0
+PASSED_TESTS=0
+FAILED_TESTS=0
+
+# Helper functions for test reporting
+print_success() {
+    echo -e "${GREEN}✅ SUCCESS${NC}: $1"
+    ((PASSED_TESTS++))
+}
+
+print_failure() {
+    echo -e "${RED}❌ FAILURE${NC}: $1"
+    ((FAILED_TESTS++))
+}
+
+print_test() {
+    echo -e "\n${BLUE}🧪 TEST $((TOTAL_TESTS + 1)):${NC} $1"
+    ((TOTAL_TESTS++))
+}
+
 echo -e "${BLUE}=== Multi-Node Testing Script ===${NC}"
 echo "Project root: $PROJECT_ROOT"
-echo "Test duration: ${TEST_DURATION}s"
+echo "Test duration: ${TEST_DURATION}s (office hours enabled for fast testing)"
 echo
 
 # Cleanup function
@@ -64,7 +85,8 @@ start_node() {
     fi
     
     cd "$PROJECT_ROOT"
-    RUST_LOG=$log_level CONFIG_FILE="examples/configs/$config_file" \
+    # Force office hours to ensure 30s intervals for faster testing
+    DEBUG_SYSTEM_TIME="2025-08-15T02:00:00Z" RUST_LOG=$log_level CONFIG_FILE="examples/configs/$config_file" \
         cargo run 2>&1 | sed "s/^/[$node_name] /" &
     
     local pid=$!
@@ -88,57 +110,57 @@ start_node() {
     return 1
 }
 
-# Check VCI data and gossip propagation
-check_vci_and_gossip() {
-    echo -e "\n${BLUE}Checking VCI data fetching progress...${NC}"
+# Test 1: Check VCI data fetching
+test_vci_data_fetching() {
+    print_test "VCI data fetching across all nodes"
     
-    local max_attempts=5
-    local attempt=1
+    echo "Waiting 45 seconds for VCI data to be fetched..."
+    sleep 45
     
-    while [ $attempt -le $max_attempts ]; do
-        echo "Check #$attempt:"
+    local all_nodes_have_data=true
+    local vci_symbols_found=0
+    
+    for i in "${!PORTS[@]}"; do
+        local port=${PORTS[$i]}
+        local node_name="Node$((i+1))"
         
-        for i in "${!PORTS[@]}"; do
-            local port=${PORTS[$i]}
-            local node_name="Node$((i+1))"
-            
-            # Get current data from node
-            local response=$(curl -s "http://localhost:$port/tickers")
-            local symbol_count=$(echo "$response" | jq -r 'keys | length')
-            
-            printf "  %-6s: %d symbols" "$node_name" "$symbol_count"
-            
-            if [ "$symbol_count" -gt 0 ]; then
-                # Show which VCI symbols are present
-                local vci_present=""
-                for symbol in "${VCI_SYMBOLS[@]}"; do
-                    if echo "$response" | jq -e ".$symbol" > /dev/null 2>&1; then
-                        vci_present="$vci_present $symbol"
-                    fi
-                done
-                if [ -n "$vci_present" ]; then
-                    echo " (VCI:$vci_present)"
-                else
-                    echo " (no VCI data yet)"
-                fi
-            else
-                echo " (no data yet)"
+        local response=$(curl -s "http://localhost:$port/tickers" 2>/dev/null || echo "{}")
+        local symbol_count=$(echo "$response" | jq -r 'keys | length' 2>/dev/null || echo "0")
+        
+        echo "  $node_name: $symbol_count symbols"
+        
+        if [ "$symbol_count" -lt 10 ]; then
+            all_nodes_have_data=false
+        fi
+        
+        # Count VCI symbols
+        for symbol in "${VCI_SYMBOLS[@]}"; do
+            if echo "$response" | jq -e ".$symbol" > /dev/null 2>&1; then
+                ((vci_symbols_found++))
+                break
             fi
         done
-        
-        echo
-        sleep 15
-        attempt=$((attempt + 1))
     done
+    
+    if [ "$all_nodes_have_data" = true ]; then
+        print_success "All nodes have fetched ticker data"
+    else
+        print_failure "Some nodes failed to fetch sufficient ticker data"
+    fi
+    
+    if [ "$vci_symbols_found" -ge 2 ]; then
+        print_success "VCI symbols found across nodes ($vci_symbols_found nodes with VCI data)"
+    else
+        print_failure "Insufficient VCI symbols found ($vci_symbols_found nodes with VCI data)"
+    fi
 }
 
-# Test gossip by sending real VCI-like data
-test_real_gossip() {
-    echo -e "\n${BLUE}Testing gossip with realistic data...${NC}"
+# Test 2: Gossip communication
+test_gossip_communication() {
+    print_test "Gossip communication between nodes"
     
-    # Send VND symbol data from Node 1 to Node 2 (simulate additional Vietnamese stock)
-    echo "Sending VND data from Node 1 to Node 2..."
-    curl -X POST "http://localhost:8889/gossip" \
+    echo "Sending VND data to Node 2 via gossip..."
+    local gossip_response=$(curl -X POST "http://localhost:8889/gossip" \
         -H "Authorization: Bearer secret-token-A-12345" \
         -H "Content-Type: application/json" \
         -d '{
@@ -149,56 +171,59 @@ test_real_gossip() {
             "close": 29000.0,
             "volume": 15000000,
             "symbol": "VND"
-        }' -s > /dev/null
+        }' -s -w "%{http_code}")
     
-    sleep 2
-    echo "✓ VND data sent to Node 2"
-}
-
-# Final verification of all data
-verify_final_data() {
-    echo -e "\n${BLUE}Final Data Verification${NC}"
-    echo "======================================================"
-    
-    # Check gossip propagation
-    echo -e "\n${YELLOW}Gossip Test Results:${NC}"
-    local vnd_node2=$(curl -s "http://localhost:8889/tickers" | jq -r '.VND // empty')
-    if [ -n "$vnd_node2" ] && [ "$vnd_node2" != "null" ]; then
-        local vnd_price=$(echo "$vnd_node2" | jq -r '.[0].close')
-        echo "  ✓ Node 2 received VND gossip data (close: ${vnd_price} VND)"
+    if [[ "$gossip_response" =~ 200$ ]]; then
+        print_success "Gossip message sent successfully to Node 2"
     else
-        echo "  ✗ Node 2 did not receive VND gossip data"
+        print_failure "Failed to send gossip message (HTTP: ${gossip_response})"
+        return
     fi
     
-    # Check VCI data consistency across nodes
-    echo -e "\n${YELLOW}VCI Data Consistency:${NC}"
-    for symbol in "${VCI_SYMBOLS[@]}"; do
-        echo "  $symbol prices across nodes:"
-        for i in "${!PORTS[@]}"; do
-            local port=${PORTS[$i]}
-            local node_name="Node$((i+1))"
-            local price=$(curl -s "http://localhost:$port/tickers" | jq -r ".$symbol[0].close // \"no data\"")
-            printf "    %-6s: %s\n" "$node_name" "$price"
-        done
-    done
+    sleep 2
     
-    # Summary statistics
-    echo -e "\n${YELLOW}Summary:${NC}"
+    # Check if Node 2 received the gossip data
+    local vnd_data=$(curl -s "http://localhost:8889/tickers" | jq -r '.VND // empty' 2>/dev/null)
+    if [ -n "$vnd_data" ] && [ "$vnd_data" != "null" ] && [ "$vnd_data" != "empty" ]; then
+        local vnd_price=$(echo "$vnd_data" | jq -r '.[0].close' 2>/dev/null || echo "unknown")
+        print_success "Node 2 received VND gossip data (close: $vnd_price)"
+    else
+        print_failure "Node 2 did not receive VND gossip data"
+    fi
+}
+
+# Test 3: Health endpoints and office hours
+test_health_endpoints() {
+    print_test "Health endpoints and office hours detection"
+    
+    local all_healthy=true
+    
     for i in "${!PORTS[@]}"; do
         local port=${PORTS[$i]}
         local node_name="Node$((i+1))"
-        local response=$(curl -s "http://localhost:$port/tickers")
-        local total_symbols=$(echo "$response" | jq -r 'keys | length')
-        local vci_count=$(echo "$response" | jq -r 'keys[]' | grep -E '^(VCB|TCB|FPT|ACB)$' | wc -l | tr -d ' ')
-        local other_count=$((total_symbols - vci_count))
         
-        echo "  $node_name: $total_symbols symbols ($vci_count VCI + $other_count other)"
+        local health_response=$(curl -s "http://localhost:$port/health" 2>/dev/null || echo "{}")
+        local is_office_hours=$(echo "$health_response" | jq -r '.is_office_hours // false' 2>/dev/null)
+        local current_interval=$(echo "$health_response" | jq -r '.current_interval_secs // 0' 2>/dev/null)
+        local debug_override=$(echo "$health_response" | jq -r '.debug_time_override // "null"' 2>/dev/null)
+        
+        echo "  $node_name: office_hours=$is_office_hours, interval=${current_interval}s, debug=$debug_override"
+        
+        if [ "$is_office_hours" != "true" ] || [ "$current_interval" != "30" ]; then
+            all_healthy=false
+        fi
     done
+    
+    if [ "$all_healthy" = true ]; then
+        print_success "All nodes report office hours active with 30s intervals"
+    else
+        print_failure "Some nodes have incorrect office hours or interval settings"
+    fi
 }
 
-# Main execution
+# Main execution with timeout
 main() {
-    echo -e "${BLUE}Starting multi-node test...${NC}"
+    echo -e "${BLUE}Starting multi-node test with timeout...${NC}"
     
     # Pre-flight checks
     check_ports
@@ -209,34 +234,42 @@ main() {
     cargo build --release
     
     # Start all nodes
-    echo -e "\n${BLUE}Starting nodes...${NC}"
+    echo -e "\n${BLUE}Starting nodes with office hours enabled...${NC}"
     for i in "${!NODE_CONFIGS[@]}"; do
         local node_name="Node$((i+1))"
         local config_file="${NODE_CONFIGS[$i]}"
         local port="${PORTS[$i]}"
         
-        start_node "$node_name" "$config_file" "$port"
-        sleep 3  # Stagger startup
+        if ! start_node "$node_name" "$config_file" "$port"; then
+            print_failure "Failed to start $node_name"
+            return 1
+        fi
+        sleep 2  # Stagger startup
     done
     
-    # Monitor VCI data fetching progress
-    check_vci_and_gossip
+    # Run tests
+    test_health_endpoints
+    test_vci_data_fetching
+    test_gossip_communication
     
-    # Test gossip with realistic data
-    test_real_gossip
+    # Print final results
+    echo -e "\n${BLUE}=== Test Results ===${NC}"
+    echo -e "Total Tests: $TOTAL_TESTS"
+    echo -e "${GREEN}Passed: $PASSED_TESTS${NC}"
+    echo -e "${RED}Failed: $FAILED_TESTS${NC}"
     
-    # Final verification
-    verify_final_data
-    
-    echo -e "\n${GREEN}=== Real-World Test Complete ===${NC}"
-    echo "This test verified:"
-    echo "1. ✓ All 3 nodes started on different ports"
-    echo "2. ✓ VCI API integration (${VCI_SYMBOLS[*]})"
-    echo "3. ✓ Gossip communication between nodes"
-    echo "4. ✓ Data consistency across the network"
-    echo
-    echo "Node intervals: Node1(30s), Node2(35s), Node3(40s)"
-    echo "Total runtime: ${TEST_DURATION}s - enough for multiple VCI API calls"
+    if [ $FAILED_TESTS -eq 0 ]; then
+        echo -e "\n${GREEN}✅ SUCCESS: All multi-node tests passed! 🎉${NC}"
+        echo "Verified:"
+        echo "1. ✓ All 3 nodes started on different ports"
+        echo "2. ✓ Office hours detection and interval management"
+        echo "3. ✓ VCI API integration and data fetching"
+        echo "4. ✓ Gossip communication between nodes"
+        exit 0
+    else
+        echo -e "\n${RED}❌ FAILURE: Some tests failed. Check the output above for details.${NC}"
+        exit 1
+    fi
 }
 
 # Run the main function
