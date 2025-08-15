@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !.env.test
+!.env.public-node-example
 .idx/.data
 *Zone.Identifier
 
