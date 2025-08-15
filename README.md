@@ -35,36 +35,25 @@ aipriceaction-proxy is a distributed system for collecting, processing, and dist
 
 ## Quick Start
 
-### 🐳 Docker (Recommended)
+### Docker Compose (Recommended)
 
-The fastest way to get started:
+The easiest way to get started:
 
 ```bash
-# Pull and run the latest version (single-node setup)
-docker run -p 8888:8888 \
-  -e PRIMARY_TOKEN="secret-token-A-12345" \
-  -e SECONDARY_TOKEN="secret-token-B-67890" \
-  -e INTERNAL_PEER_URLS="" \
-  quanhua92/aipriceaction-proxy:latest
+# Start the service
+docker-compose up -d
 
-# Or with custom node name
-docker run -p 8888:8888 \
-  -e NODE_NAME="my-node" \
-  -e PRIMARY_TOKEN="secret-token-A-12345" \
-  -e SECONDARY_TOKEN="secret-token-B-67890" \
-  -e INTERNAL_PEER_URLS="" \
-  quanhua92/aipriceaction-proxy:latest
-```
-
-**Verify it's working:**
-```bash
+# Verify it's working
 curl http://localhost:8888/health | jq .
 curl "http://localhost:8888/tickers?symbol=VCB&symbol=TCB" | jq .
+
+# Stop when done
+docker-compose down
 ```
 
-📖 **[Complete Getting Started Guide](docs/GETTING_STARTED.md)** - Docker Compose, Kubernetes, configuration options, and troubleshooting.
+**[Complete Getting Started Guide](docs/GETTING_STARTED.md)** - Alternative Docker methods, local development, Kubernetes, configuration options, and troubleshooting.
 
-### 🦀 Local Development
+### Local Development
 
 For development or building from source:
 

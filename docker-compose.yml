@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # Single node deployment
   aipriceaction-proxy:
-    build: .
+    image: quanhua92/aipriceaction-proxy:latest
     container_name: aipriceaction-proxy
     ports:
       - "8888:8888"

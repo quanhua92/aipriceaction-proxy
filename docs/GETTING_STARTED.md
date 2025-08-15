@@ -13,14 +13,29 @@ This guide will help you quickly get started with aipriceaction-proxy, a high-pe
 
 ## Quick Start with Docker
 
-The fastest way to get started is using our pre-built Docker image.
+### 1. Easiest: Docker Compose (Recommended)
+
+The simplest way to get started is using Docker Compose:
+
+```bash
+# Start the service
+docker-compose up -d
+
+# Check if it's running
+curl http://localhost:8888/health | jq .
+
+# Stop the service when done
+docker-compose down
+```
+
+### 2. Alternative: Direct Docker Run
+
+You can also run using Docker directly with the pre-built image.
 
 > **⚠️ Important**: The container requires three mandatory environment variables:
 > - `PRIMARY_TOKEN` - Primary authentication token
 > - `SECONDARY_TOKEN` - Secondary authentication token  
 > - `INTERNAL_PEER_URLS` - Peer URLs (use empty string `""` for single-node setups)
-
-### 1. Run with Docker
 
 ```bash
 # Basic single-node setup (minimal required environment variables)
@@ -506,6 +521,38 @@ This script will test:
 - System status and configuration 
 - Data availability and ticker counts
 - API endpoint functionality
+
+## Cleanup
+
+When you're done testing, clean up your deployment:
+
+### Docker Compose Cleanup
+```bash
+# Stop and remove containers, networks, and volumes
+docker-compose down
+
+# Optional: Remove downloaded images
+docker-compose down --rmi all
+```
+
+### Docker Run Cleanup
+```bash
+# Stop running containers
+docker ps -q --filter "ancestor=quanhua92/aipriceaction-proxy:latest" | xargs -r docker stop
+
+# Remove stopped containers
+docker ps -aq --filter "ancestor=quanhua92/aipriceaction-proxy:latest" | xargs -r docker rm
+
+# Optional: Remove the image
+docker rmi quanhua92/aipriceaction-proxy:latest
+```
+
+### Local Development Cleanup
+```bash
+# No cleanup needed - cargo run stops when you press Ctrl+C
+# Optional: Clean build artifacts
+cargo clean
+```
 
 ## Next Steps
 
