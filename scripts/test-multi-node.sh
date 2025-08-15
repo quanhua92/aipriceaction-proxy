@@ -219,14 +219,55 @@ start_nodes() {
     fi
 }
 
-# Test 1: Check VCI data fetching (simplified with fail-fast)
+# Test 1: Check VCI data fetching (with proper polling)
 test_vci_data_fetching() {
     print_test "VCI data fetching across all nodes"
     
-    echo "Waiting 30 seconds for VCI data to be fetched..."
-    sleep 30
+    echo "Waiting for VCI data to be fetched (polling with timeout)..."
+    local max_wait=90  # Maximum wait time in seconds
+    local wait_time=0
+    local check_interval=5
     
+    while [ $wait_time -lt $max_wait ]; do
+        local nodes_with_data=0
+        local all_nodes_ready=true
+        
+        echo "  → Checking data availability... ($wait_time/${max_wait}s)"
+        
+        for i in "${!PORTS[@]}"; do
+            local port=${PORTS[$i]}
+            local node_name="Node$((i+1))"
+            
+            local response=$(curl -s "http://localhost:$port/tickers" 2>/dev/null || echo "{}")
+            local symbol_count=$(echo "$response" | jq -r 'keys | length' 2>/dev/null || echo "0")
+            
+            echo "    $node_name: $symbol_count symbols"
+            
+            if [ "$symbol_count" -ge 10 ]; then
+                ((nodes_with_data++))
+            else
+                all_nodes_ready=false
+            fi
+        done
+        
+        if [ "$all_nodes_ready" = true ] && [ $nodes_with_data -eq ${#PORTS[@]} ]; then
+            print_success "All $nodes_with_data nodes have fetched sufficient ticker data (≥10 symbols)"
+            return 0
+        fi
+        
+        # Check if we should fail fast (no progress after reasonable time)
+        if [ $wait_time -ge 45 ] && [ $nodes_with_data -eq 0 ]; then
+            print_failure "No nodes have data after 45s - likely a connection issue"
+            return 1
+        fi
+        
+        sleep $check_interval
+        wait_time=$((wait_time + check_interval))
+    done
+    
+    # Final check with detailed output
     local nodes_with_data=0
+    echo "Final data check after timeout:"
     
     for i in "${!PORTS[@]}"; do
         local port=${PORTS[$i]}
@@ -237,20 +278,17 @@ test_vci_data_fetching() {
         
         echo "  $node_name: $symbol_count symbols"
         
-        if [ "$symbol_count" -ge 5 ]; then
+        if [ "$symbol_count" -ge 10 ]; then
             ((nodes_with_data++))
-        else
-            print_failure "$node_name has insufficient data ($symbol_count symbols)"
-            return 1  # Fail fast
         fi
     done
     
     if [ $nodes_with_data -eq ${#PORTS[@]} ]; then
-        print_success "All $nodes_with_data nodes have fetched ticker data"
-        return 0  # Explicit success return
+        print_success "All $nodes_with_data nodes eventually fetched ticker data"
+        return 0
     else
-        print_failure "Only $nodes_with_data/${#PORTS[@]} nodes have data"
-        return 1  # Fail fast
+        print_failure "Only $nodes_with_data/${#PORTS[@]} nodes have sufficient data after ${max_wait}s"
+        return 1
     fi
 }
 
