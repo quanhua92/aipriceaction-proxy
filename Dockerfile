@@ -21,10 +21,9 @@ WORKDIR /app
 FROM chef AS rust-planner
 WORKDIR /app
 
-# Copy workspace files
+# Copy only dependency files for cargo-chef
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
-COPY ./src ./src
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2: Cache dependencies
