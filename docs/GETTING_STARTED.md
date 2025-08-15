@@ -28,6 +28,8 @@ curl http://localhost:8888/health | jq .
 docker-compose down
 ```
 
+> **Platform Issues**: If you encounter platform mismatch errors on AMD64/x86_64 servers, add `platform: linux/amd64` to your docker-compose.yml under the service definition.
+
 ### 2. Alternative: Direct Docker Run
 
 You can also run using Docker directly with the pre-built image.
@@ -443,6 +445,15 @@ docker run -p 8888:8888 \
 
 # Check if port is already in use
 lsof -i :8888
+
+# Platform architecture mismatch error
+# Error: "requested image's platform (linux/arm64/v8) does not match detected host platform (linux/amd64/v3)"
+# Solution: Specify platform explicitly
+docker run --platform linux/amd64 -p 8888:8888 \
+  -e PRIMARY_TOKEN="your-primary-token" \
+  -e SECONDARY_TOKEN="your-secondary-token" \
+  -e INTERNAL_PEER_URLS="" \
+  quanhua92/aipriceaction-proxy:latest
 ```
 
 #### 2. No Data Available

@@ -94,14 +94,37 @@ BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 print_info "Git commit: $GIT_COMMIT"
 print_info "Build date: $BUILD_DATE"
 
-# Build the Docker image
-print_info "Building Docker image..."
-docker build \
-    --build-arg BUILD_DATE="$BUILD_DATE" \
-    --build-arg GIT_COMMIT="$GIT_COMMIT" \
-    --tag "$IMAGE_NAME:$TAG" \
-    --tag "$IMAGE_NAME:latest" \
-    .
+# Check if buildx is available for multi-platform builds
+if docker buildx version >/dev/null 2>&1; then
+    print_info "Docker buildx detected - building for multiple platforms (linux/amd64,linux/arm64)"
+    
+    # Create and use buildx builder if it doesn't exist
+    if ! docker buildx ls | grep -q multiplatform; then
+        print_info "Creating multiplatform buildx builder..."
+        docker buildx create --name multiplatform --use
+    else
+        docker buildx use multiplatform
+    fi
+    
+    # Build for current platform first (for local testing)
+    print_info "Building Docker image for current platform..."
+    docker buildx build \
+        --build-arg BUILD_DATE="$BUILD_DATE" \
+        --build-arg GIT_COMMIT="$GIT_COMMIT" \
+        --tag "$IMAGE_NAME:$TAG" \
+        --tag "$IMAGE_NAME:latest" \
+        --load \
+        .
+else
+    print_warning "Docker buildx not available - building for current platform only"
+    print_info "Building Docker image..."
+    docker build \
+        --build-arg BUILD_DATE="$BUILD_DATE" \
+        --build-arg GIT_COMMIT="$GIT_COMMIT" \
+        --tag "$IMAGE_NAME:$TAG" \
+        --tag "$IMAGE_NAME:latest" \
+        .
+fi
 
 if [ $? -eq 0 ]; then
     print_success "Docker image built successfully!"
@@ -114,24 +137,42 @@ fi
 if [ -n "$DOCKERHUB_USERNAME" ]; then
     print_info "Tagging for DockerHub with username: $DOCKERHUB_USERNAME"
     
-    # Tag with username for DockerHub
-    docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
-    docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
-    
-    # Also tag with git commit
-    docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT"
+    if docker buildx version >/dev/null 2>&1; then
+        print_info "Building and pushing multi-platform images to DockerHub..."
+        docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg BUILD_DATE="$BUILD_DATE" \
+            --build-arg GIT_COMMIT="$GIT_COMMIT" \
+            --tag "$DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG" \
+            --tag "$DOCKERHUB_USERNAME/$IMAGE_NAME:latest" \
+            --tag "$DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT" \
+            --push \
+            .
+        
+        print_success "Multi-platform images pushed to DockerHub!"
+    else
+        # Tag with username for DockerHub (single platform)
+        docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
+        docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
+        
+        # Also tag with git commit
+        docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT"
+    fi
     
     print_success "Tagged images for DockerHub:"
     echo "  - $DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
     echo "  - $DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
     echo "  - $DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT"
     
-    print_info "To push to DockerHub, run:"
-    echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
-    echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
-    echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT"
-    
-    print_warning "Make sure you're logged in to DockerHub: docker login"
+    if ! docker buildx version >/dev/null 2>&1; then
+        print_info "To push to DockerHub, run:"
+        echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
+        echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
+        echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT"
+        
+        print_warning "Make sure you're logged in to DockerHub: docker login"
+        print_info "Note: For multi-platform support, use Docker buildx"
+    fi
 else
     print_warning "DOCKERHUB_USERNAME environment variable not set."
     print_info "Set it to enable DockerHub tagging:"
