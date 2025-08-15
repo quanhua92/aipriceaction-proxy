@@ -14,6 +14,6 @@ public_peers:
 
 core_network_url: null
 public_refresh_interval_secs: 300
-core_worker_interval_secs: 35
+core_worker_interval_secs: 30
 environment: "development"
 port: 8889

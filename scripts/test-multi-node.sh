@@ -247,6 +247,7 @@ test_vci_data_fetching() {
     
     if [ $nodes_with_data -eq ${#PORTS[@]} ]; then
         print_success "All $nodes_with_data nodes have fetched ticker data"
+        return 0  # Explicit success return
     else
         print_failure "Only $nodes_with_data/${#PORTS[@]} nodes have data"
         return 1  # Fail fast
@@ -285,6 +286,7 @@ test_gossip_communication() {
     if [ -n "$vnd_data" ] && [ "$vnd_data" != "null" ] && [ "$vnd_data" != "empty" ]; then
         local vnd_price=$(echo "$vnd_data" | jq -r '.[0].close' 2>/dev/null || echo "unknown")
         print_success "Node 2 received VND gossip data (close: $vnd_price)"
+        return 0  # Explicit success return
     else
         print_failure "Node 2 did not receive VND gossip data"
         return 1  # Fail fast
@@ -324,6 +326,7 @@ test_health_endpoints() {
     done
     
     print_success "All nodes report office hours active with 30s intervals and debug override"
+    return 0  # Explicit success return
 }
 
 # Build or prepare runtime environment
