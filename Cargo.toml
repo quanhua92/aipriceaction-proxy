@@ -16,6 +16,7 @@ rand = "0.9.2"
 reqwest = { version = "0.12.23", features = ["json", "gzip"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 tokio = { version = "1.47.1", features = ["full"] }
 tower = "0.5.2"
 tower_governor = "0.8.0"

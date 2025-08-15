@@ -45,14 +45,19 @@ impl FromRef<AppState> for SharedTokenConfig {
 
 #[tokio::main]
 async fn main() {
+    let app_config = config::AppConfig::load();
+    
+    // Initialize tracing with node_name in all logs
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_target(false)
         .init();
 
-    tracing::info!("Starting aipriceaction-proxy");
+    // Set a global span with node_name for all subsequent logs
+    let _span = tracing::info_span!("node", name = %app_config.node_name).entered();
     
-    let app_config = config::AppConfig::from_env();
-    tracing::info!(?app_config.environment, "Loaded configuration");
+    tracing::info!("Starting aipriceaction-proxy");
+    tracing::info!(?app_config.environment, port = app_config.port, "Loaded configuration");
     
     let shared_data: SharedData = Arc::new(Mutex::new(InMemoryData::new()));
     let shared_reputation: SharedReputation = Arc::new(Mutex::new(PublicActorReputation::new()));
@@ -85,7 +90,7 @@ async fn main() {
         )
         .with_state(app_state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8888));
+    let addr = SocketAddr::from(([0, 0, 0, 0], app_config.port));
     tracing::info!(%addr, "Server listening");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())

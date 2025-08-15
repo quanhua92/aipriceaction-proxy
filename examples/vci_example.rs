@@ -39,7 +39,7 @@ async fn main() -> Result<(), VciError> {
     println!("\n📈 Historical Data for {}", test_symbol);
     println!("{}", "-".repeat(40));
     
-    match client.get_history(test_symbol, "2025-08-01", Some("2025-08-13"), "1D").await {
+    match client.get_history(test_symbol, "2025-08-01", Some("2025-08-15"), "1D").await {
         Ok(data) => {
             let data_count = data.len();
             println!("✅ Success! Retrieved {} data points", data_count);
@@ -68,7 +68,7 @@ async fn main() -> Result<(), VciError> {
     println!("{}", "-".repeat(40));
     
     let test_symbols = vec!["VCI".to_string(), "TCB".to_string(), "FPT".to_string()];
-    match client.get_batch_history(&test_symbols, "2025-08-14", Some("2025-08-14"), "1D").await {
+    match client.get_batch_history(&test_symbols, "2025-08-14", Some("2025-08-15"), "1D").await {
         Ok(batch_data) => {
             println!("✅ Batch request successful for {} symbols!", test_symbols.len());
             println!("📈 Latest closing prices:");

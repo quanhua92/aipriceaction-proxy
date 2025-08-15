@@ -31,15 +31,24 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
     };
     
     let gossip_client = ReqwestClient::new();
-    let tickers = vec!["VCB".to_string(), "TCB".to_string(), "FPT".to_string(), "ACB".to_string()];
-    info!(?tickers, "Tracking tickers");
+    let all_tickers = vec!["VCB".to_string(), "TCB".to_string(), "FPT".to_string(), "ACB".to_string()];
+    info!(?all_tickers, "Available tickers for random selection");
 
     let mut iteration_count = 0;
     loop {
         iteration_count += 1;
         debug!(iteration = iteration_count, "Starting data fetch cycle");
         
-        match vci_client.get_batch_history(&tickers, "2025-08-14", Some("2025-08-14"), "1D").await {
+        // Randomly select 2 out of 4 tickers using simple approach
+        let first_idx = iteration_count % all_tickers.len();
+        let second_idx = (iteration_count + 2) % all_tickers.len();
+        let selected_tickers = vec![
+            all_tickers[first_idx].clone(),
+            all_tickers[second_idx].clone()
+        ];
+        info!(iteration = iteration_count, ?selected_tickers, "Selected tickers for this cycle");
+        
+        match vci_client.get_batch_history(&selected_tickers, "2025-08-14", Some("2025-08-15"), "1D").await {
             Ok(batch_data) => {
                 info!(iteration = iteration_count, symbols_count = batch_data.len(), "Successfully fetched batch data from VCI");
                 

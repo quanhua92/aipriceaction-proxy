@@ -1,0 +1,19 @@
+# Node 2 Configuration - Secondary Core Node
+node_name: "node-02"
+tokens:
+  primary: "secret-token-A-12345"
+  secondary: "secret-token-B-67890"
+
+# Node 2 connects to Node 1 and Node 3
+internal_peers:
+  - "http://localhost:8888"
+  - "http://localhost:8890"
+
+public_peers:
+  - "https://api.aipriceaction.com"
+
+core_network_url: null
+public_refresh_interval_secs: 300
+core_worker_interval_secs: 35
+environment: "development"
+port: 8889

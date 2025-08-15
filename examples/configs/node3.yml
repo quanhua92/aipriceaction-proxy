@@ -1,0 +1,19 @@
+# Node 3 Configuration - Tertiary Core Node
+node_name: "node-03"
+tokens:
+  primary: "secret-token-A-12345"
+  secondary: "secret-token-B-67890"
+
+# Node 3 connects to Node 1 and Node 2
+internal_peers:
+  - "http://localhost:8888"
+  - "http://localhost:8889"
+
+public_peers:
+  - "https://api.aipriceaction.com"
+
+core_network_url: null
+public_refresh_interval_secs: 300
+core_worker_interval_secs: 40
+environment: "development"
+port: 8890
