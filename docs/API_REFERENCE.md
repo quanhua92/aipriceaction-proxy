@@ -246,7 +246,9 @@ curl "http://localhost:8888/health"
   "iteration_count": 5,
   "last_update_timestamp": "2025-08-15T13:14:01.137445+00:00",
   "current_system_time": "2025-08-15T13:14:01.137441+00:00",
-  "debug_time_override": null
+  "debug_time_override": null,
+  "build_date": "2025-08-15T14:55:00Z",
+  "git_commit": "abc123def456"
 }
 ```
 
@@ -301,7 +303,9 @@ System operational metrics:
   "iteration_count": 5,                     // Processing iterations
   "last_update_timestamp": "...",           // Last data update time
   "current_system_time": "...",             // Current system time
-  "debug_time_override": null               // Debug time override (if any)
+  "debug_time_override": null,              // Debug time override (if any)
+  "build_date": "2025-08-15T14:55:00Z",     // Build timestamp from Docker
+  "git_commit": "abc123def456"              // Git commit hash
 }
 ```
 

@@ -84,6 +84,8 @@ pub struct AppConfig {
     pub office_hours_config: OfficeHoursConfig,
     pub environment: String,
     pub port: u16,
+    pub build_date: Option<String>,
+    pub git_commit: Option<String>,
 }
 
 impl AppConfig {
@@ -118,6 +120,8 @@ impl AppConfig {
             office_hours_config: yaml_config.office_hours_config.unwrap_or_default(),
             environment: yaml_config.environment,
             port: yaml_config.port,
+            build_date: env::var("BUILD_DATE").ok(),
+            git_commit: env::var("GIT_COMMIT").ok(),
         }
     }
 
@@ -194,6 +198,8 @@ impl AppConfig {
             office_hours_config: OfficeHoursConfig::default(), // Use default Vietnam office hours
             environment,
             port,
+            build_date: env::var("BUILD_DATE").ok(),
+            git_commit: env::var("GIT_COMMIT").ok(),
         }
     }
 }

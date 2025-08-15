@@ -101,6 +101,10 @@ pub struct HealthStats {
     // Debug info
     pub current_system_time: String, // Current system time (ISO format)
     pub debug_time_override: Option<String>, // Debug time override if set
+    
+    // Build info
+    pub build_date: Option<String>, // Build timestamp from Docker
+    pub git_commit: Option<String>, // Git commit hash
 }
 
 impl Default for HealthStats {
@@ -123,6 +127,8 @@ impl Default for HealthStats {
             last_update_timestamp: None,
             current_system_time: Utc::now().to_rfc3339(),
             debug_time_override: None,
+            build_date: None,
+            git_commit: None,
         }
     }
 }

@@ -79,6 +79,10 @@ RUN echo "Building binary for native musl target" && \
 FROM alpine:3.22 AS final-image
 WORKDIR /app
 
+# Accept build arguments
+ARG BUILD_DATE
+ARG GIT_COMMIT
+
 # Install ca-certificates and curl for HTTPS requests and health checks
 RUN apk add --no-cache ca-certificates curl
 
@@ -87,6 +91,8 @@ RUN addgroup -S appgroup && adduser -S -G appgroup appuser
 
 # Set default environment variables
 ENV RUST_LOG="info"
+ENV BUILD_DATE="${BUILD_DATE}"
+ENV GIT_COMMIT="${GIT_COMMIT}"
 
 # Copy the compiled binary from rust-builder stage
 COPY --from=rust-builder /app/aipriceaction-proxy-bin ./aipriceaction-proxy

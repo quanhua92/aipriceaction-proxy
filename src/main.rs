@@ -89,6 +89,8 @@ async fn main() {
         node_name: app_config.node_name.clone(),
         internal_peers_count: app_config.internal_peers.len(),
         public_peers_count: app_config.public_peers.len(),
+        build_date: app_config.build_date.clone(),
+        git_commit: app_config.git_commit.clone(),
         ..HealthStats::default()
     };
     let shared_health_stats: SharedHealthStats = Arc::new(Mutex::new(health_stats));

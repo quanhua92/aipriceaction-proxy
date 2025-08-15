@@ -113,6 +113,8 @@ curl -s "http://localhost:8888/health"
   "is_office_hours": true,
   "current_interval_secs": 30,
   "debug_time_override": "2025-08-15T02:00:00Z",
+  "build_date": "2025-08-15T14:55:00Z",
+  "git_commit": "abc123def456",
   "status": "healthy"
 }
 ```
