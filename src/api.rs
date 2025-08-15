@@ -263,17 +263,35 @@ pub async fn get_ticker_groups_handler(State(state): State<SharedTickerGroups>) 
     (StatusCode::OK, Json(state.0.clone()))
 }
 
-#[instrument(skip(state))]
-pub async fn health_handler(State(state): State<SharedHealthStats>) -> impl IntoResponse {
+#[instrument(skip(health_state, data_state))]
+pub async fn health_handler(
+    State(health_state): State<SharedHealthStats>,
+    State(data_state): State<SharedData>,
+) -> impl IntoResponse {
     debug!("Received request for health stats");
     
-    let health_stats = state.lock().await.clone();
+    let mut health_stats = health_state.lock().await.clone();
+    
+    // Calculate current memory usage dynamically
+    {
+        let data_guard = data_state.lock().await;
+        let memory_bytes = crate::data_structures::estimate_memory_usage(&*data_guard);
+        let memory_mb = memory_bytes as f64 / (1024.0 * 1024.0);
+        let memory_percent = (memory_bytes as f64 / crate::data_structures::MAX_MEMORY_BYTES as f64) * 100.0;
+        
+        health_stats.memory_usage_bytes = memory_bytes;
+        health_stats.memory_usage_mb = memory_mb;
+        health_stats.memory_usage_percent = memory_percent;
+        health_stats.active_tickers_count = data_guard.len();
+    }
     
     info!(
         is_office_hours = health_stats.is_office_hours,
         current_interval_secs = health_stats.current_interval_secs,
         active_tickers = health_stats.active_tickers_count,
         total_tickers = health_stats.total_tickers_count,
+        memory_mb = format!("{:.2}", health_stats.memory_usage_mb),
+        memory_percent = format!("{:.1}%", health_stats.memory_usage_percent),
         iteration_count = health_stats.iteration_count,
         "Returning health stats"
     );
