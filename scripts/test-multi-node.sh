@@ -2,8 +2,32 @@
 
 # Multi-Node Testing Script for aipriceaction-proxy
 # This script starts 3 nodes with different configurations and tests gossip communication
+# Usage: ./test-multi-node.sh [--runtime native|docker]
 
 set -e
+
+# Parse command line arguments
+RUNTIME="native"  # Default to native
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --runtime)
+            RUNTIME="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option $1"
+            echo "Usage: $0 [--runtime native|docker]"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate runtime parameter
+if [[ "$RUNTIME" != "native" && "$RUNTIME" != "docker" ]]; then
+    echo "Error: --runtime must be either 'native' or 'docker'"
+    echo "Usage: $0 [--runtime native|docker]"
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -15,6 +39,11 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Fix for symlink issues - use realpath if available
+if command -v realpath >/dev/null 2>&1; then
+    PROJECT_ROOT="$(realpath "$PROJECT_ROOT")"
+fi
 TEST_DURATION=60  # Run for 60s - fast test with office hours enabled
 NODE_CONFIGS=("node1.yml" "node2.yml" "node3.yml")
 PORTS=(8888 8889 8890)
@@ -42,6 +71,7 @@ print_test() {
 }
 
 echo -e "${BLUE}=== Multi-Node Testing Script ===${NC}"
+echo "Runtime: $RUNTIME"
 echo "Project root: $PROJECT_ROOT"
 echo "Test duration: ${TEST_DURATION}s (office hours enabled for fast testing)"
 echo
@@ -49,8 +79,18 @@ echo
 # Cleanup function
 cleanup() {
     echo -e "\n${YELLOW}Cleaning up background processes...${NC}"
-    jobs -p | xargs -r kill 2>/dev/null || true
-    wait 2>/dev/null || true
+    
+    if [ "$RUNTIME" = "docker" ]; then
+        # Stop Docker Compose services
+        cd "$PROJECT_ROOT"
+        docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true
+        echo -e "${YELLOW}Docker Compose services stopped and removed${NC}"
+    else
+        # Kill native processes
+        jobs -p | xargs -r kill 2>/dev/null || true
+        wait 2>/dev/null || true
+    fi
+    
     echo -e "${GREEN}Cleanup complete${NC}"
 }
 
@@ -69,45 +109,104 @@ check_ports() {
     done
 }
 
-# Start a node
-start_node() {
-    local node_name=$1
-    local config_file=$2
-    local port=$3
-    
-    echo -e "${BLUE}Starting $node_name (port $port)...${NC}"
-    
-    # Set log level based on node name - DEBUG for Node1, INFO for others
-    local log_level="info"
-    if [ "$node_name" = "Node1" ]; then
-        log_level="debug"
-        echo -e "${YELLOW}  → Using DEBUG logging for $node_name${NC}"
-    fi
-    
-    cd "$PROJECT_ROOT"
-    # Force office hours to ensure 30s intervals for faster testing
-    DEBUG_SYSTEM_TIME="2025-08-15T02:00:00Z" RUST_LOG=$log_level CONFIG_FILE="examples/configs/$config_file" \
-        cargo run 2>&1 | sed "s/^/[$node_name] /" &
-    
-    local pid=$!
-    echo "Node $node_name started with PID $pid"
-    
-    # Wait a moment for the node to start
-    sleep 2
-    
-    # Check if the node is responding
-    local attempts=0
-    while [ $attempts -lt 10 ]; do
-        if curl -s "http://localhost:$port/tickers" > /dev/null; then
-            echo -e "${GREEN}✓ $node_name is responding on port $port${NC}"
-            return 0
+# Start nodes using Docker Compose or native
+start_nodes() {
+    if [ "$RUNTIME" = "docker" ]; then
+        echo -e "${BLUE}Starting all nodes with Docker Compose...${NC}"
+        cd "$PROJECT_ROOT"
+        
+        # Start all services with Docker Compose
+        if ! docker-compose -f docker-compose.test.yml up -d; then
+            echo -e "${RED}Failed to start Docker Compose services${NC}"
+            return 1
         fi
-        sleep 1
-        attempts=$((attempts + 1))
-    done
-    
-    echo -e "${RED}✗ $node_name failed to start properly${NC}"
-    return 1
+        
+        echo -e "${GREEN}✓ Docker Compose services started${NC}"
+        
+        # Wait for all services to be healthy
+        echo -e "${BLUE}Waiting for services to be healthy...${NC}"
+        local max_wait=60
+        local wait_time=0
+        
+        while [ $wait_time -lt $max_wait ]; do
+            local healthy_count=0
+            for port in "${PORTS[@]}"; do
+                if curl -s "http://localhost:$port/health" > /dev/null 2>&1; then
+                    ((healthy_count++))
+                fi
+            done
+            
+            if [ $healthy_count -eq ${#PORTS[@]} ]; then
+                echo -e "${GREEN}✓ All nodes are healthy and responding${NC}"
+                return 0
+            fi
+            
+            sleep 2
+            wait_time=$((wait_time + 2))
+            echo "  → Waiting for nodes to be ready... ($wait_time/${max_wait}s)"
+        done
+        
+        echo -e "${RED}✗ Timeout waiting for nodes to be healthy${NC}"
+        echo "Container status:"
+        docker-compose -f docker-compose.test.yml ps
+        return 1
+    else
+        # Native execution - start each node individually
+        echo -e "${BLUE}Starting nodes natively...${NC}"
+        for i in "${!NODE_CONFIGS[@]}"; do
+            local node_name="Node$((i+1))"
+            local config_file="${NODE_CONFIGS[$i]}"
+            local port="${PORTS[$i]}"
+            
+            echo -e "${BLUE}Starting $node_name (port $port)...${NC}"
+            
+            # Set log level based on node name - DEBUG for Node1, INFO for others
+            local log_level="info"
+            if [ "$node_name" = "Node1" ]; then
+                log_level="debug"
+                echo -e "${YELLOW}  → Using DEBUG logging for $node_name${NC}"
+            fi
+            
+            cd "$PROJECT_ROOT"
+            
+            # Force office hours to ensure 30s intervals for faster testing
+            DEBUG_SYSTEM_TIME="2025-08-15T02:00:00Z" RUST_LOG=$log_level CONFIG_FILE="examples/configs/$config_file" \
+                cargo run 2>&1 | sed "s/^/[$node_name] /" &
+            
+            local pid=$!
+            echo "  → Node $node_name started with PID $pid"
+            
+            # Wait a moment before starting next node
+            sleep 2
+        done
+        
+        # Wait for all native nodes to be responding
+        echo -e "${BLUE}Waiting for native nodes to be ready...${NC}"
+        sleep 5
+        
+        for i in "${!PORTS[@]}"; do
+            local port="${PORTS[$i]}"
+            local node_name="Node$((i+1))"
+            local attempts=0
+            
+            while [ $attempts -lt 15 ]; do
+                if curl -s "http://localhost:$port/tickers" > /dev/null 2>&1; then
+                    echo -e "${GREEN}✓ $node_name is responding on port $port${NC}"
+                    break
+                fi
+                sleep 1
+                attempts=$((attempts + 1))
+            done
+            
+            if [ $attempts -eq 15 ]; then
+                echo -e "${RED}✗ $node_name failed to start properly${NC}"
+                return 1
+            fi
+        done
+        
+        echo -e "${GREEN}✓ All native nodes started successfully${NC}"
+        return 0
+    fi
 }
 
 # Test 1: Check VCI data fetching
@@ -221,31 +320,55 @@ test_health_endpoints() {
     fi
 }
 
+# Build or prepare runtime environment
+prepare_runtime() {
+    if [ "$RUNTIME" = "docker" ]; then
+        echo -e "${BLUE}Preparing Docker Compose environment...${NC}"
+        
+        # Check if Docker is running
+        if ! docker info >/dev/null 2>&1; then
+            echo -e "${RED}Error: Docker is not running${NC}"
+            exit 1
+        fi
+        
+        # Check if docker-compose is available
+        if ! command -v docker-compose >/dev/null 2>&1; then
+            echo -e "${RED}Error: docker-compose is not installed${NC}"
+            exit 1
+        fi
+        
+        # Build Docker images via Docker Compose
+        echo -e "${BLUE}Building Docker images with Docker Compose...${NC}"
+        cd "$PROJECT_ROOT"
+        if ! docker-compose -f docker-compose.test.yml build --quiet; then
+            echo -e "${RED}Failed to build Docker images${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Docker images built successfully${NC}"
+    else
+        echo -e "${BLUE}Building project for native execution...${NC}"
+        cd "$PROJECT_ROOT"
+        cargo build --release
+        echo -e "${GREEN}✓ Native build completed${NC}"
+    fi
+}
+
 # Main execution with timeout
 main() {
-    echo -e "${BLUE}Starting multi-node test with timeout...${NC}"
+    echo -e "${BLUE}Starting multi-node test with $RUNTIME runtime...${NC}"
     
     # Pre-flight checks
     check_ports
     
-    # Build the project
-    echo -e "${BLUE}Building project...${NC}"
-    cd "$PROJECT_ROOT"
-    cargo build --release
+    # Prepare runtime environment
+    prepare_runtime
     
     # Start all nodes
     echo -e "\n${BLUE}Starting nodes with office hours enabled...${NC}"
-    for i in "${!NODE_CONFIGS[@]}"; do
-        local node_name="Node$((i+1))"
-        local config_file="${NODE_CONFIGS[$i]}"
-        local port="${PORTS[$i]}"
-        
-        if ! start_node "$node_name" "$config_file" "$port"; then
-            print_failure "Failed to start $node_name"
-            return 1
-        fi
-        sleep 2  # Stagger startup
-    done
+    if ! start_nodes; then
+        print_failure "Failed to start nodes"
+        return 1
+    fi
     
     # Run tests
     test_health_endpoints
@@ -254,20 +377,22 @@ main() {
     
     # Print final results
     echo -e "\n${BLUE}=== Test Results ===${NC}"
+    echo -e "Runtime: $RUNTIME"
     echo -e "Total Tests: $TOTAL_TESTS"
     echo -e "${GREEN}Passed: $PASSED_TESTS${NC}"
     echo -e "${RED}Failed: $FAILED_TESTS${NC}"
     
     if [ $FAILED_TESTS -eq 0 ]; then
-        echo -e "\n${GREEN}✅ SUCCESS: All multi-node tests passed! 🎉${NC}"
+        echo -e "\n${GREEN}✅ SUCCESS: All multi-node tests passed with $RUNTIME runtime! 🎉${NC}"
         echo "Verified:"
         echo "1. ✓ All 3 nodes started on different ports"
         echo "2. ✓ Office hours detection and interval management"
         echo "3. ✓ VCI API integration and data fetching"
         echo "4. ✓ Gossip communication between nodes"
+        echo "5. ✓ $RUNTIME runtime execution working correctly"
         exit 0
     else
-        echo -e "\n${RED}❌ FAILURE: Some tests failed. Check the output above for details.${NC}"
+        echo -e "\n${RED}❌ FAILURE: Some tests failed with $RUNTIME runtime. Check the output above for details.${NC}"
         exit 1
     fi
 }

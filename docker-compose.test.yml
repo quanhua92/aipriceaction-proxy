@@ -1,0 +1,81 @@
+services:
+  # Node 1 - Primary node with debug logging
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple
+    container_name: aipriceaction-node1
+    ports:
+      - "8888:8888"
+    environment:
+      - CONFIG_FILE=examples/configs/node1.yml
+      - DEBUG_SYSTEM_TIME=2025-08-15T02:00:00Z
+      - RUST_LOG=debug
+      - PORT=8888
+      - ENVIRONMENT=development
+    networks:
+      - aipriceaction-test
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8888/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Node 2 - Secondary node with info logging
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple
+    container_name: aipriceaction-node2
+    ports:
+      - "8889:8889"
+    environment:
+      - CONFIG_FILE=examples/configs/node2.yml
+      - DEBUG_SYSTEM_TIME=2025-08-15T02:00:00Z
+      - RUST_LOG=info
+      - PORT=8889
+      - ENVIRONMENT=development
+    networks:
+      - aipriceaction-test
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8889/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      node1:
+        condition: service_healthy
+
+  # Node 3 - Tertiary node with info logging
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple
+    container_name: aipriceaction-node3
+    ports:
+      - "8890:8890"
+    environment:
+      - CONFIG_FILE=examples/configs/node3.yml
+      - DEBUG_SYSTEM_TIME=2025-08-15T02:00:00Z
+      - RUST_LOG=info
+      - PORT=8890
+      - ENVIRONMENT=development
+    networks:
+      - aipriceaction-test
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8890/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+
+networks:
+  aipriceaction-test:
+    driver: bridge

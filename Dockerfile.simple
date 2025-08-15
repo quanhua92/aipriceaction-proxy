@@ -1,0 +1,50 @@
+# Simple Dockerfile for testing purposes
+FROM rust:1.88-slim-bookworm AS builder
+
+# Install required packages for building
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the source code
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src/
+COPY ticker_group.json ./
+COPY examples/ ./examples/
+
+# Build the application
+RUN cargo build --release
+
+# Create the runtime image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the binary and required files
+COPY --from=builder /app/target/release/aipriceaction-proxy ./
+COPY --from=builder /app/ticker_group.json ./
+COPY --from=builder /app/examples ./examples
+
+# Create non-root user
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Set default environment
+ENV RUST_LOG=info
+
+# Expose port
+EXPOSE 8080
+
+# Run the application
+CMD ["./aipriceaction-proxy"]
