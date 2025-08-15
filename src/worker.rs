@@ -161,6 +161,7 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                     
                     let mut data_guard = data.lock().await;
                     let mut updated_symbols = Vec::new();
+                    let mut batch_stats = Vec::new();
                     
                     for (symbol, ohlcv_data_vec) in batch_data {
                         if let Some(data_vec) = ohlcv_data_vec {
@@ -185,10 +186,13 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                             
                             // Use dividend-aware deduplication instead of direct replacement
                             let existing_entry = data_guard.entry(symbol.clone()).or_default();
+                            let existing_count = existing_entry.len();
                             let added_count = crate::data_structures::merge_and_deduplicate_data(existing_entry, limited_data_vec);
-                            debug!(symbol, added_count, "Applied dividend-aware deduplication");
+                            let final_count = existing_entry.len();
+                            
                             updated_symbols.push(symbol.clone());
-                            debug!(symbol, data_points, date_range, "Updated symbol data with date range");
+                            batch_stats.push(format!("{}:{}", symbol, final_count));
+                            debug!(symbol, existing_count, added_count, final_count, date_range, "Applied dividend-aware deduplication");
 
                             if let Some(gossip_payload) = latest_data {
                                 // --- 1. Broadcast to INTERNAL peers (trusted, with token) ---
@@ -267,11 +271,12 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                             }
                         } else {
                             warn!(symbol, "No data available for symbol");
+                            batch_stats.push(format!("{}:0", symbol));
                         }
                     }
                     
                     drop(data_guard);
-                    info!(iteration = iteration_count, batch = batch_num, updated_symbols = ?updated_symbols, "Completed batch processing");
+                    info!(iteration = iteration_count, batch = batch_num, symbols_with_data = batch_stats.join(", "), "Completed batch processing");
                 }
                 Err(e) => {
                     error!(iteration = iteration_count, batch = batch_num, error = ?e, "Failed to fetch batch data from VCI");
