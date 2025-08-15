@@ -35,28 +35,41 @@ aipriceaction-proxy is a distributed system for collecting, processing, and dist
 
 ## Quick Start
 
-### Prerequisites
-- Rust (latest stable)
-- curl, jq (for testing)
-- Docker (optional)
+### 🐳 Docker (Recommended)
 
-### Build and Run
+The fastest way to get started:
+
 ```bash
-# Build the project
-cargo build --release
+# Pull and run the latest version
+docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
 
-# Start a single node
+# Or with environment variables
+docker run -p 8888:8888 \
+  -e NODE_NAME="my-node" \
+  -e PRIMARY_TOKEN="secret-token-A-12345" \
+  -e SECONDARY_TOKEN="secret-token-B-67890" \
+  quanhua92/aipriceaction-proxy:latest
+```
+
+**Verify it's working:**
+```bash
+curl http://localhost:8888/health | jq .
+curl "http://localhost:8888/tickers?symbol=VCB&symbol=TCB" | jq .
+```
+
+📖 **[Complete Getting Started Guide](docs/GETTING_STARTED.md)** - Docker Compose, Kubernetes, configuration options, and troubleshooting.
+
+### 🦀 Local Development
+
+For development or building from source:
+
+```bash
+# Prerequisites: Rust (latest stable), curl, jq
+cargo build --release
 cargo run
 
 # Or with custom configuration
 CONFIG_FILE="examples/configs/node1.yml" cargo run
-
-# Using environment variables
-export NODE_NAME="node-01"
-export PORT="8888"
-export PRIMARY_TOKEN="secret-token-A-12345"
-export SECONDARY_TOKEN="secret-token-B-67890"
-cargo run
 ```
 
 ### API Endpoints

@@ -78,6 +78,59 @@ graph TB
 4. **Real-time Performance**: Sub-second gossip protocol for market data distribution
 5. **Security by Design**: Defense-in-depth with authentication, rate limiting, and reputation tracking
 
+## 🐳 Docker Deployment
+
+The system is available as a production-ready Docker image for easy deployment and scaling.
+
+### **Quick Start**
+
+```bash
+# Run latest version
+docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
+
+# With environment configuration
+docker run -p 8888:8888 \
+  -e NODE_NAME="prod-node-01" \
+  -e PRIMARY_TOKEN="secure-token-A-123" \
+  -e SECONDARY_TOKEN="secure-token-B-456" \
+  -e ENVIRONMENT="production" \
+  quanhua92/aipriceaction-proxy:latest
+```
+
+### **Production Multi-Node Setup**
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  core-node:
+    image: quanhua92/aipriceaction-proxy:latest
+    ports: ["8888:8888"]
+    environment:
+      NODE_NAME: "core-node-01"
+      PRIMARY_TOKEN: "secure-token-ABC"
+      SECONDARY_TOKEN: "secure-token-DEF"
+      ENVIRONMENT: "production"
+    
+  peer-node-1:
+    image: quanhua92/aipriceaction-proxy:latest
+    ports: ["8889:8888"]
+    environment:
+      NODE_NAME: "peer-node-01"
+      PRIMARY_TOKEN: "secure-token-ABC"
+      INTERNAL_PEER_URLS: "http://core-node:8888"
+```
+
+### **Container Features**
+
+- **Base**: Alpine Linux 3.22 (40.4MB total size)
+- **Security**: Non-root user execution
+- **Architecture**: Multi-platform (amd64, arm64)
+- **Tags**: `latest`, `0.1.0`, git commit hashes
+- **Health**: Built-in `/health` endpoint for monitoring
+
+📖 **[Complete Getting Started Guide](GETTING_STARTED.md)** - Detailed Docker usage, Kubernetes deployment, configuration examples, and troubleshooting.
+
 ---
 
 ## 🎯 The Hybrid Trust Model Explained

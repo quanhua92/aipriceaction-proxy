@@ -8,6 +8,17 @@ This document provides comprehensive documentation for all available API endpoin
 http://localhost:8888
 ```
 
+## 🐳 Quick Start with Docker
+
+```bash
+# Run the API server
+docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
+
+# Test the API
+curl http://localhost:8888/health | jq .
+curl "http://localhost:8888/tickers?symbol=VCB&symbol=TCB" | jq .
+```
+
 ## Endpoints
 
 ### 1. Get Tickers Data
@@ -322,3 +333,289 @@ The system operates in different modes based on market hours:
 - **Non-Office Hours**: Slower update intervals (300 seconds)
 - **Timezone**: Configurable (default: Asia/Ho_Chi_Minh)
 - **Hours**: Configurable (default: 9 AM - 4 PM)
+
+## Docker Usage Examples
+
+### Single Node Deployment
+
+```bash
+# Basic deployment
+docker run -d --name aipriceaction-proxy \
+  -p 8888:8888 \
+  -e NODE_NAME="api-server" \
+  -e PRIMARY_TOKEN="secure-token-123" \
+  -e SECONDARY_TOKEN="secure-token-456" \
+  -e ENVIRONMENT="production" \
+  quanhua92/aipriceaction-proxy:latest
+
+# Check logs
+docker logs aipriceaction-proxy
+
+# Test API endpoints
+curl http://localhost:8888/health
+curl http://localhost:8888/tickers | jq 'keys | length'
+```
+
+### Multi-Node with Docker Compose
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  core-node:
+    image: quanhua92/aipriceaction-proxy:latest
+    container_name: aipriceaction-core
+    ports:
+      - "8888:8888"
+    environment:
+      - NODE_NAME=core-node-01
+      - PRIMARY_TOKEN=secure-internal-token-ABC123
+      - SECONDARY_TOKEN=secure-internal-token-DEF456
+      - ENVIRONMENT=production
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api-gateway:
+    image: quanhua92/aipriceaction-proxy:latest
+    container_name: aipriceaction-gateway
+    ports:
+      - "8889:8888"
+    environment:
+      - NODE_NAME=api-gateway-01
+      - PRIMARY_TOKEN=secure-internal-token-ABC123
+      - SECONDARY_TOKEN=secure-internal-token-DEF456
+      - INTERNAL_PEER_URLS=http://core-node:8888
+      - ENVIRONMENT=production
+      - RUST_LOG=info
+    depends_on:
+      - core-node
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: aipriceaction-network
+```
+
+```bash
+# Deploy the stack
+docker-compose up -d
+
+# Scale the API gateway
+docker-compose up -d --scale api-gateway=3
+
+# View all endpoints
+echo "Core Node: http://localhost:8888/health"
+echo "Gateway: http://localhost:8889/health"
+
+# Stop the stack
+docker-compose down
+```
+
+### Production Deployment with Custom Configuration
+
+```bash
+# Create production config
+cat > production.yml << 'EOF'
+node_name: "prod-api-01"
+environment: "production"
+port: 8888
+
+tokens:
+  primary: "prod-secure-token-primary-xyz789"
+  secondary: "prod-secure-token-secondary-abc123"
+
+enable_office_hours: true
+office_hours_config:
+  default_office_hours:
+    timezone: "Asia/Ho_Chi_Minh"
+    start_hour: 9
+    end_hour: 16
+
+core_worker_interval_secs: 30
+non_office_worker_interval_secs: 300
+
+internal_peers:
+  - "https://node2.yourcompany.com:8888"
+  - "https://node3.yourcompany.com:8888"
+
+public_peers:
+  - "https://api.yourcompany.com"
+EOF
+
+# Deploy with custom configuration
+docker run -d --name aipriceaction-prod \
+  -p 8888:8888 \
+  -v $(pwd)/production.yml:/app/production.yml \
+  -e CONFIG_FILE=production.yml \
+  -e RUST_LOG=info \
+  --restart unless-stopped \
+  quanhua92/aipriceaction-proxy:latest
+
+# Monitor the deployment
+docker logs -f aipriceaction-prod
+```
+
+### Kubernetes Deployment
+
+```yaml
+# k8s-deployment.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aipriceaction-config
+data:
+  config.yml: |
+    node_name: "k8s-node"
+    environment: "production"
+    port: 8888
+    enable_office_hours: true
+    office_hours_config:
+      default_office_hours:
+        timezone: "Asia/Ho_Chi_Minh"
+        start_hour: 9
+        end_hour: 16
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aipriceaction-proxy
+  labels:
+    app: aipriceaction-proxy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: aipriceaction-proxy
+  template:
+    metadata:
+      labels:
+        app: aipriceaction-proxy
+    spec:
+      containers:
+      - name: aipriceaction-proxy
+        image: quanhua92/aipriceaction-proxy:latest
+        ports:
+        - containerPort: 8888
+        env:
+        - name: CONFIG_FILE
+          value: "/config/config.yml"
+        - name: PRIMARY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: aipriceaction-secrets
+              key: primary-token
+        - name: SECONDARY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: aipriceaction-secrets
+              key: secondary-token
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: config-volume
+          mountPath: /config
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8888
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8888
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: aipriceaction-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aipriceaction-service
+spec:
+  selector:
+    app: aipriceaction-proxy
+  ports:
+  - port: 80
+    targetPort: 8888
+    name: http
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aipriceaction-secrets
+type: Opaque
+data:
+  primary-token: <base64-encoded-primary-token>
+  secondary-token: <base64-encoded-secondary-token>
+```
+
+```bash
+# Deploy to Kubernetes
+kubectl apply -f k8s-deployment.yaml
+
+# Check deployment status
+kubectl get pods -l app=aipriceaction-proxy
+kubectl get service aipriceaction-service
+
+# Access the API
+kubectl port-forward service/aipriceaction-service 8888:80
+curl http://localhost:8888/health
+
+# Scale the deployment
+kubectl scale deployment aipriceaction-proxy --replicas=5
+```
+
+### Monitoring and Maintenance
+
+```bash
+# Health monitoring script
+#!/bin/bash
+while true; do
+  echo "=== $(date) ==="
+  curl -s http://localhost:8888/health | jq '{
+    node: .node_name,
+    uptime: .uptime_secs,
+    tickers: .total_tickers_count,
+    office_hours: .is_office_hours
+  }'
+  echo
+  sleep 30
+done
+
+# Log aggregation
+docker run -d --name log-viewer \
+  -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  --label=io.portainer.accesscontrol.public \
+  dozzle/dozzle:latest
+
+# Performance monitoring
+docker stats aipriceaction-proxy
+
+# Backup configuration
+docker run --rm \
+  -v aipriceaction_config:/config \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/config-backup-$(date +%Y%m%d).tar.gz -C /config .
+```
