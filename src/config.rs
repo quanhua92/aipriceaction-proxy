@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 // Holds tokens for zero-downtime rotation
@@ -16,6 +17,41 @@ pub type SharedTokenConfig = Arc<TokenConfig>;
 // Holds URLs of peer servers (internal and public)
 pub type PeerList = Arc<Vec<String>>;
 
+// Office hours configuration
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OfficeHours {
+    pub start_hour: u32,     // e.g., 9 for 9am
+    pub end_hour: u32,       // e.g., 16 for 4pm
+    pub timezone: String,    // e.g., "Asia/Ho_Chi_Minh"
+    pub weekdays_only: bool, // true for Monday-Friday only
+}
+
+impl Default for OfficeHours {
+    fn default() -> Self {
+        Self {
+            start_hour: 9,
+            end_hour: 16,
+            timezone: "Asia/Ho_Chi_Minh".to_string(),
+            weekdays_only: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OfficeHoursConfig {
+    pub default_office_hours: OfficeHours,
+    pub ticker_specific: HashMap<String, OfficeHours>, // Future: per-ticker hours
+}
+
+impl Default for OfficeHoursConfig {
+    fn default() -> Self {
+        Self {
+            default_office_hours: OfficeHours::default(),
+            ticker_specific: HashMap::new(),
+        }
+    }
+}
+
 // YAML-serializable configuration structure
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ConfigYaml {
@@ -26,6 +62,9 @@ pub struct ConfigYaml {
     pub core_network_url: Option<String>,
     pub public_refresh_interval_secs: u64,
     pub core_worker_interval_secs: u64,
+    pub non_office_hours_interval_secs: Option<u64>,
+    pub enable_office_hours: Option<bool>,
+    pub office_hours_config: Option<OfficeHoursConfig>,
     pub environment: String,
     pub port: u16,
 }
@@ -40,6 +79,9 @@ pub struct AppConfig {
     pub core_network_url: Option<String>,
     pub public_refresh_interval: Duration,
     pub core_worker_interval: Duration,
+    pub non_office_hours_interval: Duration,
+    pub enable_office_hours: bool,
+    pub office_hours_config: OfficeHoursConfig,
     pub environment: String,
     pub port: u16,
 }
@@ -71,6 +113,9 @@ impl AppConfig {
             core_network_url: yaml_config.core_network_url,
             public_refresh_interval: Duration::from_secs(yaml_config.public_refresh_interval_secs),
             core_worker_interval: Duration::from_secs(yaml_config.core_worker_interval_secs),
+            non_office_hours_interval: Duration::from_secs(yaml_config.non_office_hours_interval_secs.unwrap_or(300)),
+            enable_office_hours: yaml_config.enable_office_hours.unwrap_or(true),
+            office_hours_config: yaml_config.office_hours_config.unwrap_or_default(),
             environment: yaml_config.environment,
             port: yaml_config.port,
         }
@@ -126,6 +171,16 @@ impl AppConfig {
         let node_name = env::var("NODE_NAME")
             .unwrap_or_else(|_| "aipriceaction-proxy".to_string());
 
+        let non_office_hours_interval_secs = env::var("NON_OFFICE_HOURS_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(300); // Default to 5 minutes
+
+        let enable_office_hours = env::var("ENABLE_OFFICE_HOURS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(true); // Default to true
+
         Self {
             node_name,
             tokens,
@@ -134,6 +189,9 @@ impl AppConfig {
             core_network_url,
             public_refresh_interval: Duration::from_secs(public_refresh_interval_secs),
             core_worker_interval: Duration::from_secs(core_worker_interval_secs),
+            non_office_hours_interval: Duration::from_secs(non_office_hours_interval_secs),
+            enable_office_hours,
+            office_hours_config: OfficeHoursConfig::default(), // Use default Vietnam office hours
             environment,
             port,
         }

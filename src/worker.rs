@@ -1,8 +1,10 @@
 use crate::config::{AppConfig, load_ticker_groups};
-use crate::data_structures::{InMemoryData, SharedData};
+use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval};
 use std::time::Duration;
+use std::sync::Arc;
 use reqwest::Client as ReqwestClient;
 use rand::prelude::SliceRandom;
+use tokio::sync::Mutex;
 use tracing::{info, debug, warn, error, instrument};
 
 #[instrument(skip(data, config))]
@@ -19,6 +21,19 @@ pub async fn run(data: SharedData, config: AppConfig) {
 #[instrument(skip(data, config))]
 async fn run_core_node_worker(data: SharedData, config: AppConfig) {
     info!("Initializing core node worker");
+    
+    // Initialize office hours state
+    let office_hours_state: SharedOfficeHoursState = Arc::new(Mutex::new(OfficeHoursState::default()));
+    
+    info!(
+        enable_office_hours = config.enable_office_hours,
+        office_hours_start = config.office_hours_config.default_office_hours.start_hour,
+        office_hours_end = config.office_hours_config.default_office_hours.end_hour,
+        timezone = config.office_hours_config.default_office_hours.timezone,
+        core_interval_secs = config.core_worker_interval.as_secs(),
+        non_office_interval_secs = config.non_office_hours_interval.as_secs(),
+        "Office hours configuration loaded"
+    );
     
     let mut vci_client = match crate::vci::VciClient::new(true, 30) {
         Ok(client) => {
@@ -51,7 +66,40 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
 
     loop {
         iteration_count += 1;
-        debug!(iteration = iteration_count, "Starting data fetch cycle");
+        
+        // Check office hours and update state
+        let is_office_hours = is_within_office_hours(&config.office_hours_config);
+        let current_interval = get_current_interval(
+            &config.office_hours_config,
+            config.core_worker_interval,
+            config.non_office_hours_interval,
+            config.enable_office_hours
+        );
+        
+        // Update office hours state
+        {
+            let mut state = office_hours_state.lock().await;
+            let state_changed = state.is_office_hours != is_office_hours;
+            state.is_office_hours = is_office_hours;
+            state.current_interval = current_interval;
+            state.last_check = std::time::Instant::now();
+            
+            if state_changed {
+                info!(
+                    iteration = iteration_count,
+                    is_office_hours,
+                    current_interval_secs = current_interval.as_secs(),
+                    "Office hours status changed"
+                );
+            }
+        }
+        
+        debug!(
+            iteration = iteration_count,
+            is_office_hours,
+            current_interval_secs = current_interval.as_secs(),
+            "Starting data fetch cycle"
+        );
         
         // Process all tickers in batches of 10
         for (batch_idx, ticker_batch) in all_tickers.chunks(BATCH_SIZE).enumerate() {
@@ -78,8 +126,17 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                                 let auth_token = format!("Bearer {}", config.tokens.primary);
                                 let internal_peer_count = config.internal_peers.len();
                                 
-                                debug!(symbol, internal_peers = internal_peer_count, "Broadcasting to internal peers");
-                                for peer_url in config.internal_peers.iter() {
+                                // During non-office hours, reduce internal peer broadcasting frequency
+                                let should_broadcast_internal = if !is_office_hours {
+                                    // Only broadcast every 3rd update during non-office hours
+                                    (iteration_count % 3) == 0
+                                } else {
+                                    true // Always broadcast during office hours
+                                };
+                                
+                                if should_broadcast_internal {
+                                    debug!(symbol, internal_peers = internal_peer_count, is_office_hours, "Broadcasting to internal peers");
+                                    for peer_url in config.internal_peers.iter() {
                                     let client = gossip_client.clone();
                                     let token = auth_token.clone();
                                     let payload = gossip_payload.clone();
@@ -100,10 +157,13 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                                             }
                                         }
                                     });
+                                    }
+                                } else {
+                                    debug!(symbol, is_office_hours, iteration = iteration_count, "Skipping internal peer broadcast (non-office hours throttling)");
                                 }
                                 
-                                // --- 2. Broadcast to PUBLIC peers (untrusted, no token) - only in production ---
-                                if config.environment == "production" {
+                                // --- 2. Broadcast to PUBLIC peers (untrusted, no token) - only in production and office hours ---
+                                if config.environment == "production" && is_office_hours {
                                     let public_peer_count = config.public_peers.len();
                                     info!(symbol, public_peers = public_peer_count, "Broadcasting to public peers");
                                     
@@ -128,8 +188,10 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
                                             }
                                         });
                                     }
-                                } else {
+                                } else if config.environment != "production" {
                                     debug!(environment = %config.environment, "Skipping public peer broadcast (not in production)");
+                                } else {
+                                    debug!(is_office_hours, "Skipping public peer broadcast (non-office hours)");
                                 }
                             }
                         } else {
@@ -152,8 +214,8 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
         }
         
         info!(iteration = iteration_count, "Completed full cycle of all ticker batches");
-        debug!(interval = ?config.core_worker_interval, "Sleeping before next full cycle");
-        tokio::time::sleep(config.core_worker_interval).await;
+        debug!(interval = ?current_interval, "Sleeping before next full cycle");
+        tokio::time::sleep(current_interval).await;
         
         // Re-shuffle for next iteration
         all_tickers.shuffle(&mut rand::rng());
