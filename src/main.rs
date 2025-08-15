@@ -1,8 +1,8 @@
-mod api;
-mod config;
-mod data_structures;
-mod vci;
-mod worker;
+pub mod api;
+pub mod config;
+pub mod data_structures;
+pub mod vci;
+pub mod worker;
 
 use crate::config::SharedTokenConfig;
 use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation};

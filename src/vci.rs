@@ -176,8 +176,6 @@ impl VciClient {
             }
 
             let user_agent = self.get_user_agent();
-            
-            
             let response = self.client
                 .post(url)
                 .header("Accept", "application/json, text/plain, */*")

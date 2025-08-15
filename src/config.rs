@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub public_peers: PeerList,
     pub core_network_url: Option<String>,
     pub public_refresh_interval: Duration,
+    pub core_worker_interval: Duration,
     pub environment: String,
 }
 
@@ -53,10 +54,16 @@ impl AppConfig {
         );
 
         let core_network_url = env::var("CORE_NETWORK_URL").ok();
-        let refresh_interval_secs = env::var("PUBLIC_REFRESH_INTERVAL")
+        
+        let public_refresh_interval_secs = env::var("PUBLIC_REFRESH_INTERVAL")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(300); // Default to 5 minutes
+
+        let core_worker_interval_secs = env::var("CORE_WORKER_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(30); // Default to 30 seconds
 
         let environment = env::var("ENVIRONMENT")
             .unwrap_or_else(|_| "development".to_string());
@@ -66,7 +73,8 @@ impl AppConfig {
             internal_peers,
             public_peers,
             core_network_url,
-            public_refresh_interval: Duration::from_secs(refresh_interval_secs),
+            public_refresh_interval: Duration::from_secs(public_refresh_interval_secs),
+            core_worker_interval: Duration::from_secs(core_worker_interval_secs),
             environment,
         }
     }

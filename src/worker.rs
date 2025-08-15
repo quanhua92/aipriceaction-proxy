@@ -39,7 +39,7 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
         iteration_count += 1;
         debug!(iteration = iteration_count, "Starting data fetch cycle");
         
-        match vci_client.get_batch_history(&tickers, "2024-01-01", None, "1D").await {
+        match vci_client.get_batch_history(&tickers, "2025-08-14", Some("2025-08-14"), "1D").await {
             Ok(batch_data) => {
                 info!(iteration = iteration_count, symbols_count = batch_data.len(), "Successfully fetched batch data from VCI");
                 
@@ -126,8 +126,8 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig) {
             }
         }
         
-        debug!("Sleeping for 5 seconds before next cycle");
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        debug!(interval = ?config.core_worker_interval, "Sleeping before next cycle");
+        tokio::time::sleep(config.core_worker_interval).await;
     }
 }
 
