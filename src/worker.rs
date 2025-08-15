@@ -53,6 +53,9 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
         .flat_map(|group_tickers| group_tickers.iter().cloned())
         .collect();
     
+    // Add VNINDEX (Vietnam stock market index) to the ticker list
+    all_tickers.push("VNINDEX".to_string());
+    
     // Remove duplicates and shuffle
     all_tickers.sort();
     all_tickers.dedup();
