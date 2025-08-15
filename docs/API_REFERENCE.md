@@ -11,8 +11,12 @@ http://localhost:8888
 ## 🐳 Quick Start with Docker
 
 ```bash
-# Run the API server
-docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
+# Run the API server (single-node setup)
+docker run -p 8888:8888 \
+  -e PRIMARY_TOKEN="secret-token-A-12345" \
+  -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="" \
+  quanhua92/aipriceaction-proxy:latest
 
 # Test the API
 curl http://localhost:8888/health | jq .

@@ -85,15 +85,20 @@ The system is available as a production-ready Docker image for easy deployment a
 ### **Quick Start**
 
 ```bash
-# Run latest version
-docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
+# Run latest version (single-node setup)
+docker run -p 8888:8888 \
+  -e PRIMARY_TOKEN="secure-token-A-123" \
+  -e SECONDARY_TOKEN="secure-token-B-456" \
+  -e INTERNAL_PEER_URLS="" \
+  quanhua92/aipriceaction-proxy:latest
 
 # With environment configuration
 docker run -p 8888:8888 \
   -e NODE_NAME="prod-node-01" \
   -e PRIMARY_TOKEN="secure-token-A-123" \
   -e SECONDARY_TOKEN="secure-token-B-456" \
-  -e ENVIRONMENT="production" \
+  -e INTERNAL_PEER_URLS="" \
+  -e ENVIRONMENT="development" \
   quanhua92/aipriceaction-proxy:latest
 ```
 
@@ -110,7 +115,8 @@ services:
       NODE_NAME: "core-node-01"
       PRIMARY_TOKEN: "secure-token-ABC"
       SECONDARY_TOKEN: "secure-token-DEF"
-      ENVIRONMENT: "production"
+      INTERNAL_PEER_URLS: "http://peer-node-1:8888"
+      ENVIRONMENT: "development"
     
   peer-node-1:
     image: quanhua92/aipriceaction-proxy:latest
@@ -118,7 +124,9 @@ services:
     environment:
       NODE_NAME: "peer-node-01"
       PRIMARY_TOKEN: "secure-token-ABC"
+      SECONDARY_TOKEN: "secure-token-DEF"
       INTERNAL_PEER_URLS: "http://core-node:8888"
+      ENVIRONMENT: "development"
 ```
 
 ### **Container Features**

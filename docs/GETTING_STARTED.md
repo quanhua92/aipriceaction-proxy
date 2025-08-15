@@ -15,14 +15,27 @@ This guide will help you quickly get started with aipriceaction-proxy, a high-pe
 
 The fastest way to get started is using our pre-built Docker image.
 
+> **⚠️ Important**: The container requires three mandatory environment variables:
+> - `PRIMARY_TOKEN` - Primary authentication token
+> - `SECONDARY_TOKEN` - Secondary authentication token  
+> - `INTERNAL_PEER_URLS` - Peer URLs (use empty string `""` for single-node setups)
+
 ### 1. Run with Docker
 
 ```bash
-# Pull and run the latest version
-docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
+# Basic single-node setup (minimal required environment variables)
+docker run -p 8888:8888 \
+  -e PRIMARY_TOKEN="secret-token-A-12345" \
+  -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="" \
+  quanhua92/aipriceaction-proxy:latest
 
 # Or run a specific version
-docker run -p 8888:8888 quanhua92/aipriceaction-proxy:0.1.0
+docker run -p 8888:8888 \
+  -e PRIMARY_TOKEN="secret-token-A-12345" \
+  -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="" \
+  quanhua92/aipriceaction-proxy:0.1.0
 ```
 
 ### 2. Run with Custom Configuration
@@ -56,10 +69,22 @@ docker run -p 8888:8888 \
 ### 3. Run with Environment Variables
 
 ```bash
+# Single-node setup with custom configuration
 docker run -p 8888:8888 \
   -e NODE_NAME="docker-node-01" \
   -e PRIMARY_TOKEN="secret-token-A-12345" \
   -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="" \
+  -e ENVIRONMENT="development" \
+  -e RUST_LOG="info" \
+  quanhua92/aipriceaction-proxy:latest
+
+# Multi-node setup (requires peer URLs)
+docker run -p 8888:8888 \
+  -e NODE_NAME="peer-node-01" \
+  -e PRIMARY_TOKEN="secret-token-A-12345" \
+  -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="http://core-node:8888,http://other-peer:8889" \
   -e ENVIRONMENT="production" \
   -e RUST_LOG="info" \
   quanhua92/aipriceaction-proxy:latest
@@ -132,15 +157,16 @@ docker run -p 8888:8888 aipriceaction-proxy:dev-local
 
 ### Environment Variables
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `NODE_NAME` | Unique node identifier | `"aipriceaction-proxy"` | `"prod-node-01"` |
-| `PORT` | HTTP server port | `8888` | `3000` |
-| `PRIMARY_TOKEN` | Primary authentication token | `"primary-token-xxx"` | `"secret-ABC-123"` |
-| `SECONDARY_TOKEN` | Secondary authentication token | `"secondary-token-xxx"` | `"secret-DEF-456"` |
-| `ENVIRONMENT` | Deployment environment | `"development"` | `"production"` |
-| `CONFIG_FILE` | Path to YAML config file | `""` | `"config/prod.yml"` |
-| `RUST_LOG` | Logging level | `"info"` | `"debug"` |
+| Variable | Description | Default | Example | Required |
+|----------|-------------|---------|---------|----------|
+| `NODE_NAME` | Unique node identifier | `"aipriceaction-proxy"` | `"prod-node-01"` | No |
+| `PORT` | HTTP server port | `8888` | `3000` | No |
+| `PRIMARY_TOKEN` | Primary authentication token | N/A | `"secret-ABC-123"` | **Yes** |
+| `SECONDARY_TOKEN` | Secondary authentication token | N/A | `"secret-DEF-456"` | **Yes** |
+| `INTERNAL_PEER_URLS` | Comma-separated peer URLs | N/A | `"http://node1:8888,http://node2:8889"` or `""` for single-node | **Yes** |
+| `ENVIRONMENT` | Deployment environment | `"development"` | `"production"` | No |
+| `CONFIG_FILE` | Path to YAML config file | `""` | `"config/prod.yml"` | No |
+| `RUST_LOG` | Logging level | `"info"` | `"debug"` | No |
 
 ### YAML Configuration
 
@@ -266,7 +292,8 @@ services:
       - NODE_NAME=core-node-01
       - PRIMARY_TOKEN=secure-token-ABC-123
       - SECONDARY_TOKEN=secure-token-DEF-456
-      - ENVIRONMENT=production
+      - INTERNAL_PEER_URLS=http://peer-node-1:8888,http://peer-node-2:8888
+      - ENVIRONMENT=development
       - RUST_LOG=info
     restart: unless-stopped
 
@@ -278,11 +305,9 @@ services:
       - NODE_NAME=peer-node-01
       - PRIMARY_TOKEN=secure-token-ABC-123
       - SECONDARY_TOKEN=secure-token-DEF-456
-      - INTERNAL_PEER_URLS=http://core-node:8888
-      - ENVIRONMENT=production
+      - INTERNAL_PEER_URLS=http://core-node:8888,http://peer-node-2:8888
+      - ENVIRONMENT=development
       - RUST_LOG=info
-    depends_on:
-      - core-node
     restart: unless-stopped
 
   peer-node-2:
@@ -293,11 +318,9 @@ services:
       - NODE_NAME=peer-node-02
       - PRIMARY_TOKEN=secure-token-ABC-123
       - SECONDARY_TOKEN=secure-token-DEF-456
-      - INTERNAL_PEER_URLS=http://core-node:8888
-      - ENVIRONMENT=production
+      - INTERNAL_PEER_URLS=http://core-node:8888,http://peer-node-1:8888
+      - ENVIRONMENT=development
       - RUST_LOG=info
-    depends_on:
-      - core-node
     restart: unless-stopped
 ```
 
@@ -390,8 +413,15 @@ spec:
 # Check container logs
 docker logs $(docker ps -lq)
 
-# Run with debug logging
-docker run -p 8888:8888 -e RUST_LOG=debug quanhua92/aipriceaction-proxy:latest
+# Common error: Missing required environment variables
+# Error: "PRIMARY_TOKEN must be set: NotPresent"
+# Solution: Add required environment variables
+docker run -p 8888:8888 \
+  -e PRIMARY_TOKEN="your-primary-token" \
+  -e SECONDARY_TOKEN="your-secondary-token" \
+  -e INTERNAL_PEER_URLS="" \
+  -e RUST_LOG=debug \
+  quanhua92/aipriceaction-proxy:latest
 
 # Check if port is already in use
 lsof -i :8888

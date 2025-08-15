@@ -40,14 +40,19 @@ aipriceaction-proxy is a distributed system for collecting, processing, and dist
 The fastest way to get started:
 
 ```bash
-# Pull and run the latest version
-docker run -p 8888:8888 quanhua92/aipriceaction-proxy:latest
+# Pull and run the latest version (single-node setup)
+docker run -p 8888:8888 \
+  -e PRIMARY_TOKEN="secret-token-A-12345" \
+  -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="" \
+  quanhua92/aipriceaction-proxy:latest
 
-# Or with environment variables
+# Or with custom node name
 docker run -p 8888:8888 \
   -e NODE_NAME="my-node" \
   -e PRIMARY_TOKEN="secret-token-A-12345" \
   -e SECONDARY_TOKEN="secret-token-B-67890" \
+  -e INTERNAL_PEER_URLS="" \
   quanhua92/aipriceaction-proxy:latest
 ```
 
