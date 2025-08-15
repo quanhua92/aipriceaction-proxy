@@ -246,8 +246,8 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
     }
 }
 
-#[instrument(skip(data, health_stats), fields(core_url = %core_network_url, refresh_interval = ?refresh_interval))]
-async fn run_public_node_worker(data: SharedData, core_network_url: String, refresh_interval: Duration, health_stats: SharedHealthStats) {
+#[instrument(skip(data, _health_stats), fields(core_url = %core_network_url, refresh_interval = ?refresh_interval))]
+async fn run_public_node_worker(data: SharedData, core_network_url: String, refresh_interval: Duration, _health_stats: SharedHealthStats) {
     info!("Initializing public node worker");
     let http_client = ReqwestClient::new();
     let mut iteration_count = 0;

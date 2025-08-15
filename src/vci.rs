@@ -382,7 +382,7 @@ impl VciClient {
 
         // Create a mapping from response data using symbol field
         let mut response_map = HashMap::new();
-        for (i, data_item) in response_array.iter().enumerate() {
+        for (_i, data_item) in response_array.iter().enumerate() {
             if let Some(obj) = data_item.as_object() {
                 // Find symbol identifier in response
                 let symbol_fields = ["symbol", "ticker", "Symbol", "Ticker", "s"];

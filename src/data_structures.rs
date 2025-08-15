@@ -166,11 +166,24 @@ pub fn get_current_time() -> DateTime<Utc> {
 /// Get time info for health endpoint and other uses
 pub fn get_time_info() -> (String, Option<String>) {
     let current_time = get_current_time();
-    let debug_override = std::env::var("DEBUG_SYSTEM_TIME").ok()
-        .filter(|_| {
-            let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
-            environment != "production"
-        });
+    
+    // Check if debug time override was actually applied
+    let debug_override = if let Ok(debug_time_str) = std::env::var("DEBUG_SYSTEM_TIME") {
+        let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
+        
+        if environment != "production" {
+            // Try to parse the debug time to see if it's valid
+            if chrono::DateTime::parse_from_rfc3339(&debug_time_str).is_ok() {
+                Some(debug_time_str)
+            } else {
+                None // Invalid format, so not actually used
+            }
+        } else {
+            None // Production environment, so not used
+        }
+    } else {
+        None // No debug time set
+    };
     
     (current_time.to_rfc3339(), debug_override)
 }
