@@ -191,7 +191,7 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                             let final_count = existing_entry.len();
                             
                             updated_symbols.push(symbol.clone());
-                            batch_stats.push(format!("{}:{}", symbol, final_count));
+                            batch_stats.push(format!("{}:{}→{}", symbol, existing_count, final_count));
                             debug!(symbol, existing_count, added_count, final_count, date_range, "Applied dividend-aware deduplication");
 
                             if let Some(gossip_payload) = latest_data {
@@ -271,7 +271,7 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                             }
                         } else {
                             warn!(symbol, "No data available for symbol");
-                            batch_stats.push(format!("{}:0", symbol));
+                            batch_stats.push(format!("{}:0→0", symbol));
                         }
                     }
                     

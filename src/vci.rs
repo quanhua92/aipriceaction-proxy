@@ -187,6 +187,7 @@ impl VciClient {
             if attempt > 0 {
                 let delay = StdDuration::from_secs_f64(2.0_f64.powi(attempt as i32 - 1) + rand::random::<f64>());
                 let delay = delay.min(StdDuration::from_secs(60));
+                tracing::info!("VCI API retry backoff: attempt {}/{}, waiting {:.1}s before retry", attempt + 1, MAX_RETRIES, delay.as_secs_f64());
                 sleep(delay).await;
             }
 
