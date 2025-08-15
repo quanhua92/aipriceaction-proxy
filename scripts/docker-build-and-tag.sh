@@ -96,7 +96,7 @@ print_info "Build date: $BUILD_DATE"
 
 # Check if buildx is available for multi-platform builds
 if docker buildx version >/dev/null 2>&1; then
-    print_info "Docker buildx detected - building for multiple platforms (linux/amd64,linux/arm64)"
+    print_info "Docker buildx detected - building for AMD64 platform only"
     
     # Create and use buildx builder if it doesn't exist
     if ! docker buildx ls | grep -q multiplatform; then
@@ -138,9 +138,9 @@ if [ -n "$DOCKERHUB_USERNAME" ]; then
     print_info "Tagging for DockerHub with username: $DOCKERHUB_USERNAME"
     
     if docker buildx version >/dev/null 2>&1; then
-        print_info "Building and pushing multi-platform images to DockerHub..."
+        print_info "Building and pushing AMD64 images to DockerHub..."
         docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform linux/amd64 \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg GIT_COMMIT="$GIT_COMMIT" \
             --tag "$DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG" \
@@ -149,7 +149,7 @@ if [ -n "$DOCKERHUB_USERNAME" ]; then
             --push \
             .
         
-        print_success "Multi-platform images pushed to DockerHub!"
+        print_success "AMD64 images pushed to DockerHub!"
     else
         # Tag with username for DockerHub (single platform)
         docker tag "$IMAGE_NAME:$TAG" "$DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
@@ -171,7 +171,7 @@ if [ -n "$DOCKERHUB_USERNAME" ]; then
         echo "  docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:$GIT_COMMIT"
         
         print_warning "Make sure you're logged in to DockerHub: docker login"
-        print_info "Note: For multi-platform support, use Docker buildx"
+        print_info "Note: Using AMD64 platform only"
     fi
 else
     print_warning "DOCKERHUB_USERNAME environment variable not set."

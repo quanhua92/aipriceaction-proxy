@@ -4,6 +4,7 @@ services:
   # Single node deployment
   aipriceaction-proxy:
     image: quanhua92/aipriceaction-proxy:latest
+    platform: linux/amd64
     container_name: aipriceaction-proxy
     ports:
       - "8888:8888"
