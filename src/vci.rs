@@ -133,8 +133,8 @@ impl VciClient {
 
     fn get_user_agent(&self) -> String {
         if self.random_agent {
-            use rand::seq::SliceRandom;
-            self.user_agents.choose(&mut rand::thread_rng())
+            use rand::prelude::IndexedRandom;
+            self.user_agents.choose(&mut rand::rng())
                 .unwrap_or(&self.user_agents[0])
                 .clone()
         } else {
