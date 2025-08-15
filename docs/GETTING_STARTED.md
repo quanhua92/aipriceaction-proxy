@@ -40,29 +40,32 @@ docker run -p 8888:8888 \
 
 ### 2. Run with Custom Configuration
 
-```bash
-# Create a configuration file
-cat > node.yml << 'EOF'
-node_name: "my-node"
-tokens:
-  primary: "my-secret-token-12345"
-  secondary: "my-backup-token-67890"
-environment: "development"
-port: 8888
-enable_office_hours: true
-office_hours_config:
-  default_office_hours:
-    timezone: "Asia/Ho_Chi_Minh"
-    start_hour: 9
-    end_hour: 16
-core_worker_interval_secs: 30
-non_office_worker_interval_secs: 300
-EOF
+You can customize the configuration using environment variables (recommended) or a YAML config file.
 
-# Run with custom config
+**Option A: Environment Variables (Recommended)**
+```bash
+# Single-node setup with custom configuration
 docker run -p 8888:8888 \
-  -v $(pwd)/node.yml:/app/node.yml \
-  -e CONFIG_FILE=node.yml \
+  -e NODE_NAME="my-custom-node" \
+  -e PRIMARY_TOKEN="my-secret-token-12345" \
+  -e SECONDARY_TOKEN="my-backup-token-67890" \
+  -e INTERNAL_PEER_URLS="" \
+  -e ENVIRONMENT="development" \
+  -e RUST_LOG="info" \
+  quanhua92/aipriceaction-proxy:latest
+```
+
+**Option B: Built-in Configuration File**
+```bash
+# Use one of the built-in example configurations
+docker run -p 8888:8888 \
+  -e CONFIG_FILE=examples/configs/node1.yml \
+  quanhua92/aipriceaction-proxy:latest
+
+# Or mount your own config directory  
+docker run -p 8888:8888 \
+  -v $(pwd)/examples/configs:/app/configs \
+  -e CONFIG_FILE=configs/node1.yml \
   quanhua92/aipriceaction-proxy:latest
 ```
 
@@ -491,50 +494,18 @@ docker run -p 8888:8888 \
 
 ### Quick Health Check Script
 
+Use the provided health check script to verify your installation:
+
 ```bash
-#!/bin/bash
-# health-check.sh
-
-echo "=== aipriceaction-proxy Health Check ==="
-echo
-
-# Basic connectivity
-echo "1. Testing basic connectivity..."
-if curl -s http://localhost:8888/health > /dev/null; then
-    echo "✅ Service is responding"
-else
-    echo "❌ Service is not responding"
-    exit 1
-fi
-
-# System status
-echo -e "\n2. System status:"
-curl -s http://localhost:8888/health | jq '{
-    node: .node_name,
-    environment: .environment,
-    uptime_seconds: .uptime_secs,
-    office_hours: .is_office_hours,
-    total_tickers: .total_tickers_count,
-    active_tickers: .active_tickers_count
-}'
-
-# Data availability
-echo -e "\n3. Data availability:"
-TICKER_COUNT=$(curl -s http://localhost:8888/tickers | jq 'keys | length')
-echo "Available tickers: $TICKER_COUNT"
-
-if [ "$TICKER_COUNT" -gt 0 ]; then
-    echo "✅ Market data is available"
-else
-    echo "⚠️  No market data available (may be normal outside office hours)"
-fi
-
-echo -e "\n4. API endpoints test:"
-curl -s "http://localhost:8888/tickers?symbol=VCB" | jq 'keys' && echo "✅ Ticker filtering works"
-curl -s http://localhost:8888/tickers/group | jq 'keys | length' > /dev/null && echo "✅ Ticker groups available"
-
-echo -e "\n=== Health check complete ==="
+# Run the health check script
+./scripts/health-check.sh
 ```
+
+This script will test:
+- Basic connectivity to the service
+- System status and configuration 
+- Data availability and ticker counts
+- API endpoint functionality
 
 ## Next Steps
 

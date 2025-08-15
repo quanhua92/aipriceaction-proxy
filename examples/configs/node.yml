@@ -1,0 +1,14 @@
+node_name: "my-node"
+tokens:
+  primary: "my-secret-token-12345"
+  secondary: "my-backup-token-67890"
+environment: "development"
+port: 8888
+enable_office_hours: true
+office_hours_config:
+  default_office_hours:
+    timezone: "Asia/Ho_Chi_Minh"
+    start_hour: 9
+    end_hour: 16
+core_worker_interval_secs: 30
+non_office_worker_interval_secs: 300
