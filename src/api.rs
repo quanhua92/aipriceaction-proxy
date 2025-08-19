@@ -3,7 +3,7 @@ use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, S
 use crate::vci::OhlcvData;
 use axum::{
     extract::{ConnectInfo, State, Json},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header::CACHE_CONTROL},
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::Query;
@@ -20,6 +20,7 @@ pub struct TickerParams {
     symbol: Option<Vec<String>>,
     start_date: Option<String>,
     end_date: Option<String>,
+    all: Option<bool>,
 }
 
 #[instrument(skip(state))]
@@ -58,8 +59,8 @@ pub async fn get_all_tickers_handler(
         None => None,
     };
 
-    // If no date filters provided, default to last day only
-    let use_last_day_only = start_date_filter.is_none() && end_date_filter.is_none();
+    // If no date filters provided and all=true is not set, default to last day only
+    let use_last_day_only = start_date_filter.is_none() && end_date_filter.is_none() && !params.all.unwrap_or(false);
     
     // Filter data by symbols first
     let symbol_filtered_data = match params.symbol {
@@ -107,11 +108,15 @@ pub async fn get_all_tickers_handler(
     
     if use_last_day_only {
         info!(symbol_count, symbols = ?symbols, total_data_points, "Returning ticker data (last day only)");
+    } else if params.all.unwrap_or(false) && start_date_filter.is_none() && end_date_filter.is_none() {
+        info!(symbol_count, symbols = ?symbols, total_data_points, "Returning all ticker data (all=true)");
     } else {
         info!(symbol_count, symbols = ?symbols, total_data_points, start_date = ?params.start_date, end_date = ?params.end_date, "Returning ticker data with date filters");
     }
     
-    (StatusCode::OK, Json(date_filtered_data)).into_response()
+    let mut headers = HeaderMap::new();
+    headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+    (StatusCode::OK, headers, Json(date_filtered_data)).into_response()
 }
 
 #[instrument(skip(data_state, token_state, last_update_state, headers), fields(symbol = %payload.symbol.as_deref().unwrap_or("unknown")))]
