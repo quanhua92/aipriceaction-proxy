@@ -122,6 +122,10 @@ async fn main() {
             "https://aipriceaction.com".parse().unwrap(),
             "https://www.aipriceaction.com".parse().unwrap(),
             "http://localhost:3000".parse().unwrap(), // For local development
+            "http://100.121.116.69:9876".parse().unwrap(),
+            "http://100.121.116.69:5173".parse().unwrap(),
+            "http://192.168.1.13:5173".parse().unwrap(),
+            "http://192.168.1.13:9876".parse().unwrap(),
         ])
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
         .allow_headers(Any);
