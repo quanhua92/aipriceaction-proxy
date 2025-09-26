@@ -10,7 +10,7 @@ use axum_extra::extract::Query;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::time::Duration;
-use tracing::{info, debug, warn, error, instrument};
+use tracing::{info, debug, warn, error};
 
 // Define the struct to hold the query parameters.
 // `symbol` will hold all values passed for the "symbol" key.
@@ -23,7 +23,6 @@ pub struct TickerParams {
     format: Option<String>,  // "json" or "csv"
 }
 
-#[instrument(skip(state, enhanced_state))]
 pub async fn get_all_tickers_handler(
     State(state): State<SharedData>,
     State(enhanced_state): State<SharedEnhancedData>,
@@ -90,7 +89,6 @@ pub async fn get_all_tickers_handler(
     }
 }
 
-#[instrument(skip(data_state, token_state, last_update_state, headers), fields(symbol = %payload.symbol.as_deref().unwrap_or("unknown")))]
 pub async fn internal_gossip_handler(
     State(data_state): State<SharedData>,
     State(token_state): State<SharedTokenConfig>,
@@ -142,7 +140,6 @@ pub async fn internal_gossip_handler(
     (StatusCode::OK, "OK").into_response()
 }
 
-#[instrument(skip(data_state, reputation_state, last_update_state), fields(source_ip = %addr.ip(), symbol = %payload.symbol.as_deref().unwrap_or("unknown")))]
 pub async fn public_gossip_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(data_state): State<SharedData>,
@@ -228,7 +225,6 @@ pub async fn public_gossip_handler(
     (StatusCode::OK, "OK").into_response()
 }
 
-#[instrument(skip(state))]
 pub async fn get_ticker_groups_handler(State(state): State<SharedTickerGroups>) -> impl IntoResponse {
     debug!("Received request for ticker groups");
     
@@ -239,7 +235,6 @@ pub async fn get_ticker_groups_handler(State(state): State<SharedTickerGroups>) 
     (StatusCode::OK, Json(state.0.clone()))
 }
 
-#[instrument(skip(health_state, data_state))]
 pub async fn health_handler(
     State(health_state): State<SharedHealthStats>,
     State(data_state): State<SharedData>,

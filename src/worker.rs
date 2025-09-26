@@ -8,9 +8,8 @@ use reqwest::Client as ReqwestClient;
 use rand::prelude::SliceRandom;
 use tokio::sync::Mutex;
 use chrono::Utc;
-use tracing::{info, debug, warn, error, instrument};
+use tracing::{info, debug, warn, error};
 
-#[instrument(skip(data, enhanced_data, config, health_stats))]
 pub async fn run(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
     if let Some(core_url) = &config.core_network_url {
         info!(%core_url, "Starting as public node worker");
@@ -21,7 +20,6 @@ pub async fn run(data: SharedData, enhanced_data: SharedEnhancedData, config: Ap
     }
 }
 
-#[instrument(skip(data, enhanced_data, config, health_stats))]
 async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
     info!("Initializing core node worker");
     
@@ -398,7 +396,6 @@ async fn update_enhanced_data(
     Ok(ticker_count)
 }
 
-#[instrument(skip(data, _health_stats), fields(core_url = %core_network_url, refresh_interval = ?refresh_interval))]
 async fn run_public_node_worker(data: SharedData, core_network_url: String, refresh_interval: Duration, _health_stats: SharedHealthStats) {
     info!("Initializing public node worker");
     let http_client = ReqwestClient::new();
