@@ -121,6 +121,22 @@ impl AnalysisService {
                 // Extract MA score data for this ticker and date
                 let ma_data = self.get_ma_score_for_date(&ticker, &date_str, &ma_scores);
 
+
+                // For MA scores, use the latest available score if the exact date isn't available
+                let get_latest_ma_score = |ma: &MAScoreTickerData, scores: &std::collections::HashMap<String, f64>| -> Option<f64> {
+                    // First try to get the exact date
+                    if let Some(score) = scores.get(&ohlcv.time) {
+                        return Some(*score);
+                    }
+
+                    // If not found, get the latest available score (most recent date)
+                    if let Some((_, &score)) = scores.iter().max_by_key(|(date, _)| *date) {
+                        return Some(score);
+                    }
+
+                    None
+                };
+
                 let enhanced_point = EnhancedTickerData {
                     date: date_str,
                     open: ohlcv.open,
@@ -128,16 +144,16 @@ impl AnalysisService {
                     low: ohlcv.low,
                     close: ohlcv.close,
                     volume: ohlcv.volume,
-                    ma10: ma_data.as_ref().and_then(|ma| ma.ma10_scores.get(&ohlcv.time).copied()),
-                    ma20: ma_data.as_ref().and_then(|ma| ma.ma20_scores.get(&ohlcv.time).copied()),
-                    ma50: ma_data.as_ref().and_then(|ma| ma.ma50_scores.get(&ohlcv.time).copied()),
+                    ma10: ma_data.as_ref().and_then(|ma| get_latest_ma_score(ma, &ma.ma10_scores)),
+                    ma20: ma_data.as_ref().and_then(|ma| get_latest_ma_score(ma, &ma.ma20_scores)),
+                    ma50: ma_data.as_ref().and_then(|ma| get_latest_ma_score(ma, &ma.ma50_scores)),
                     money_flow: money_flow_data.as_ref().and_then(|mf| mf.signed_percentage_data.get(&ohlcv.time).copied()),
                     af: money_flow_data.as_ref().and_then(|mf| mf.activity_flow_data.get(&ohlcv.time).copied()),
                     df: money_flow_data.as_ref().and_then(|mf| mf.dollar_flow_data.get(&ohlcv.time).copied()),
                     ts: money_flow_data.as_ref().map(|mf| mf.trend_score),
-                    score10: ma_data.as_ref().and_then(|ma| ma.ma10_scores.get(&ohlcv.time).copied()),
-                    score20: ma_data.as_ref().and_then(|ma| ma.ma20_scores.get(&ohlcv.time).copied()),
-                    score50: ma_data.as_ref().and_then(|ma| ma.ma50_scores.get(&ohlcv.time).copied()),
+                    score10: ma_data.as_ref().and_then(|ma| get_latest_ma_score(ma, &ma.ma10_scores)),
+                    score20: ma_data.as_ref().and_then(|ma| get_latest_ma_score(ma, &ma.ma20_scores)),
+                    score50: ma_data.as_ref().and_then(|ma| get_latest_ma_score(ma, &ma.ma50_scores)),
                 };
 
 
@@ -172,10 +188,19 @@ impl AnalysisService {
     fn get_ma_score_for_date(
         &self,
         ticker: &str,
-        _date: &str,
+        date: &str,
         ma_scores: &HashMap<String, Vec<MAScoreTickerData>>,
     ) -> Option<MAScoreTickerData> {
-        // Find MA score data for this ticker
+        // First try to find MA score data for the specific date
+        if let Some(ticker_data_list) = ma_scores.get(date) {
+            for ticker_data in ticker_data_list {
+                if ticker_data.ticker == ticker {
+                    return Some(ticker_data.clone());
+                }
+            }
+        }
+
+        // If not found for specific date, try to find the ticker in any date (fallback)
         for ticker_data_list in ma_scores.values() {
             for ticker_data in ticker_data_list {
                 if ticker_data.ticker == ticker {

@@ -341,8 +341,8 @@ async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedDat
             }
         }
 
-        // Update enhanced data with calculations every 5 minutes
-        const CALCULATION_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
+        // Update enhanced data with calculations every 30 seconds (for testing)
+        const CALCULATION_INTERVAL: Duration = Duration::from_secs(30); // 30 seconds for testing
         if analysis_service.is_some() && last_calculation_time.elapsed() > CALCULATION_INTERVAL {
             info!(iteration = iteration_count, "Starting calculation update for enhanced data");
 
