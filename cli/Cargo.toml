@@ -12,9 +12,6 @@ categories = ["finance", "data-structures", "algorithms"]
 readme = "README.md"
 documentation = "https://docs.rs/aipriceaction"
 
-[[bin]]
-name = "aipriceaction"
-path = "src/main.rs"
 
 [dependencies]
 # CLI framework

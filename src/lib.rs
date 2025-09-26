@@ -1,3 +1,4 @@
+pub mod analysis_service;
 pub mod api;
 pub mod config;
 pub mod data_structures;

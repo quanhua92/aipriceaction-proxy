@@ -1,5 +1,7 @@
 use crate::config::{AppConfig, load_ticker_groups};
-use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info, get_current_time};
+use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info, get_current_time, SharedEnhancedData};
+use crate::analysis_service::AnalysisService;
+use aipriceaction::{prelude::*, data::TimeRange};
 use std::time::Duration;
 use std::sync::Arc;
 use reqwest::Client as ReqwestClient;
@@ -8,19 +10,19 @@ use tokio::sync::Mutex;
 use chrono::Utc;
 use tracing::{info, debug, warn, error, instrument};
 
-#[instrument(skip(data, config, health_stats))]
-pub async fn run(data: SharedData, config: AppConfig, health_stats: SharedHealthStats) {
+#[instrument(skip(data, enhanced_data, config, health_stats))]
+pub async fn run(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
     if let Some(core_url) = &config.core_network_url {
         info!(%core_url, "Starting as public node worker");
         run_public_node_worker(data, core_url.clone(), config.public_refresh_interval, health_stats).await;
     } else {
         info!(environment = %config.environment, "Starting as core node worker");
-        run_core_node_worker(data, config, health_stats).await;
+        run_core_node_worker(data, enhanced_data, config, health_stats).await;
     }
 }
 
-#[instrument(skip(data, config, health_stats))]
-async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats: SharedHealthStats) {
+#[instrument(skip(data, enhanced_data, config, health_stats))]
+async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
     info!("Initializing core node worker");
     
     // Initialize office hours state
@@ -68,6 +70,20 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
     const BATCH_SIZE: usize = 10;
     let mut iteration_count = 0;
     let start_time = std::time::Instant::now();
+
+    // Initialize analysis service for calculations
+    let analysis_service: Option<Arc<AnalysisService>> = match AnalysisService::new() {
+        Ok(service) => {
+            info!("Analysis service initialized successfully");
+            Some(Arc::new(service))
+        }
+        Err(e) => {
+            error!(?e, "Failed to initialize analysis service - calculations will be disabled");
+            None
+        }
+    };
+
+    let mut last_calculation_time = std::time::Instant::now();
 
     loop {
         iteration_count += 1;
@@ -326,7 +342,29 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
                 );
             }
         }
-        
+
+        // Update enhanced data with calculations every 5 minutes
+        const CALCULATION_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
+        if analysis_service.is_some() && last_calculation_time.elapsed() > CALCULATION_INTERVAL {
+            info!(iteration = iteration_count, "Starting calculation update for enhanced data");
+
+            if let Some(ref service) = analysis_service {
+                match update_enhanced_data(
+                    enhanced_data.clone(),
+                    Arc::clone(service),
+                    all_tickers.clone()
+                ).await {
+                    Ok(count) => {
+                        info!(enhanced_tickers = count, "Successfully updated enhanced data calculations");
+                        last_calculation_time = std::time::Instant::now();
+                    }
+                    Err(e) => {
+                        error!(?e, "Failed to update enhanced data calculations");
+                    }
+                }
+            }
+        }
+
         debug!(interval = ?current_interval, "Sleeping before next full cycle");
         tokio::time::sleep(current_interval).await;
         
@@ -334,6 +372,30 @@ async fn run_core_node_worker(data: SharedData, config: AppConfig, health_stats:
         all_tickers.shuffle(&mut rand::rng());
         debug!("Reshuffled tickers for next iteration");
     }
+}
+
+async fn update_enhanced_data(
+    enhanced_data: SharedEnhancedData,
+    analysis_service: Arc<AnalysisService>,
+    tickers: Vec<String>,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    // Define date range for calculations (last 60 days)
+    let date_range = DateRangeConfig::new(TimeRange::TwoMonths);
+
+    // Fetch and calculate enhanced data
+    let calculated_data = analysis_service
+        .fetch_and_calculate(tickers, date_range)
+        .await?;
+
+    let ticker_count = calculated_data.len();
+
+    // Update shared enhanced data
+    {
+        let mut data_guard = enhanced_data.lock().await;
+        *data_guard = calculated_data;
+    }
+
+    Ok(ticker_count)
 }
 
 #[instrument(skip(data, _health_stats), fields(core_url = %core_network_url, refresh_interval = ?refresh_interval))]

@@ -1,3 +1,4 @@
+pub mod analysis_service;
 pub mod api;
 pub mod config;
 pub mod data_structures;
@@ -5,7 +6,7 @@ pub mod vci;
 pub mod worker;
 
 use crate::config::SharedTokenConfig;
-use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats, HealthStats};
+use crate::data_structures::{InMemoryData, PublicActorReputation, LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats, HealthStats, SharedEnhancedData, EnhancedInMemoryData};
 use axum::{extract::FromRef, routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
@@ -15,6 +16,7 @@ use tower_http::cors::{CorsLayer, Any};
 #[derive(Clone)]
 struct AppState {
     data: SharedData,
+    enhanced_data: SharedEnhancedData,
     reputation: SharedReputation,
     last_update: LastInternalUpdate,
     tokens: SharedTokenConfig,
@@ -58,6 +60,12 @@ impl FromRef<AppState> for SharedHealthStats {
     }
 }
 
+impl FromRef<AppState> for SharedEnhancedData {
+    fn from_ref(app_state: &AppState) -> SharedEnhancedData {
+        app_state.enhanced_data.clone()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let app_config = config::AppConfig::load();
@@ -75,6 +83,7 @@ async fn main() {
     tracing::info!(?app_config.environment, port = app_config.port, "Loaded configuration");
     
     let shared_data: SharedData = Arc::new(Mutex::new(InMemoryData::new()));
+    let shared_enhanced_data: SharedEnhancedData = Arc::new(Mutex::new(EnhancedInMemoryData::new()));
     let shared_reputation: SharedReputation = Arc::new(Mutex::new(PublicActorReputation::new()));
     let last_internal_update: LastInternalUpdate = Arc::new(Mutex::new(Instant::now()));
     let shared_tokens: SharedTokenConfig = app_config.tokens.clone();
@@ -98,6 +107,7 @@ async fn main() {
 
     let app_state = AppState {
         data: shared_data.clone(),
+        enhanced_data: shared_enhanced_data.clone(),
         reputation: shared_reputation,
         last_update: last_internal_update,
         tokens: shared_tokens,
@@ -108,6 +118,7 @@ async fn main() {
     tracing::info!("Spawning background worker");
     tokio::spawn(worker::run(
         shared_data.clone(),
+        shared_enhanced_data.clone(),
         app_config.clone(),
         shared_health_stats.clone(),
     ));

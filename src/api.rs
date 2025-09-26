@@ -1,5 +1,5 @@
 use crate::config::SharedTokenConfig;
-use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats};
+use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats, SharedEnhancedData, EnhancedTickerResponse, TickerResponseMeta};
 use crate::vci::OhlcvData;
 use axum::{
     extract::{ConnectInfo, State, Json},
@@ -11,7 +11,6 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{info, debug, warn, error, instrument};
-use chrono::NaiveDate;
 
 // Define the struct to hold the query parameters.
 // `symbol` will hold all values passed for the "symbol" key.
@@ -21,102 +20,74 @@ pub struct TickerParams {
     start_date: Option<String>,
     end_date: Option<String>,
     all: Option<bool>,
+    format: Option<String>,  // "json" or "csv"
 }
 
-#[instrument(skip(state))]
+#[instrument(skip(state, enhanced_state))]
 pub async fn get_all_tickers_handler(
     State(state): State<SharedData>,
+    State(enhanced_state): State<SharedEnhancedData>,
     Query(params): Query<TickerParams>
 ) -> impl IntoResponse {
     debug!("Received request for tickers with params: {:?}", params);
-    
-    let data = state.lock().await;
-    
-    // Parse date filters
-    let start_date_filter = match &params.start_date {
-        Some(date_str) => {
-            match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                Ok(date) => Some(date.and_hms_opt(0, 0, 0).unwrap().and_utc()),
-                Err(_) => {
-                    warn!(start_date = %date_str, "Invalid start_date format, expected YYYY-MM-DD");
-                    return (StatusCode::BAD_REQUEST, Json("Invalid start_date format. Expected YYYY-MM-DD")).into_response();
-                }
+
+    let format = params.format.as_deref().unwrap_or("json");
+
+    // Try to get enhanced data first
+    let enhanced_data = enhanced_state.lock().await;
+
+    if !enhanced_data.is_empty() {
+        // Use enhanced data with calculations
+        let filtered_data = filter_enhanced_data(&enhanced_data, &params);
+
+        let symbol_count = filtered_data.len();
+        let symbols: Vec<_> = filtered_data.keys().cloned().collect();
+        let total_data_points: usize = filtered_data.values().map(|v| v.len()).sum();
+
+        info!(symbol_count, symbols = ?symbols, total_data_points, format, "Returning enhanced ticker data with calculations");
+
+        match format {
+            "csv" => {
+                // Return CSV format
+                let csv_content = format_enhanced_data_as_csv(filtered_data);
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", "text/csv".parse().unwrap());
+                headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+                (StatusCode::OK, headers, csv_content).into_response()
+            }
+            _ => {
+                // Return JSON format with metadata
+                let response = EnhancedTickerResponse {
+                    meta: TickerResponseMeta {
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        calculated: true,
+                        error: None,
+                    },
+                    data: filtered_data,
+                };
+
+                let mut headers = HeaderMap::new();
+                headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+                (StatusCode::OK, headers, Json(response)).into_response()
             }
         }
-        None => None,
-    };
-
-    let end_date_filter = match &params.end_date {
-        Some(date_str) => {
-            match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                Ok(date) => Some(date.and_hms_opt(23, 59, 59).unwrap().and_utc()),
-                Err(_) => {
-                    warn!(end_date = %date_str, "Invalid end_date format, expected YYYY-MM-DD");
-                    return (StatusCode::BAD_REQUEST, Json("Invalid end_date format. Expected YYYY-MM-DD")).into_response();
-                }
-            }
-        }
-        None => None,
-    };
-
-    // If no date filters provided and all=true is not set, default to last day only
-    let use_last_day_only = start_date_filter.is_none() && end_date_filter.is_none() && !params.all.unwrap_or(false);
-    
-    // Filter data by symbols first
-    let symbol_filtered_data = match params.symbol {
-        Some(symbols) if !symbols.is_empty() => {
-            // Filter data to only include requested symbols
-            let mut filtered = std::collections::HashMap::new();
-            for symbol in symbols {
-                if let Some(ticker_data) = data.get(&symbol) {
-                    filtered.insert(symbol, ticker_data.clone());
-                }
-            }
-            filtered
-        }
-        _ => {
-            // Return all data if no symbols specified or empty vector
-            data.clone()
-        }
-    };
-
-    // Apply date filtering
-    let mut date_filtered_data = std::collections::HashMap::new();
-    for (symbol, ticker_data) in symbol_filtered_data {
-        let filtered_data: Vec<_> = if use_last_day_only {
-            // Return only the most recent data point
-            ticker_data.into_iter().rev().take(1).collect()
-        } else {
-            // Filter by date range
-            ticker_data.into_iter()
-                .filter(|ohlcv| {
-                    let time_matches_start = start_date_filter.map_or(true, |start| ohlcv.time >= start);
-                    let time_matches_end = end_date_filter.map_or(true, |end| ohlcv.time <= end);
-                    time_matches_start && time_matches_end
-                })
-                .collect()
-        };
-        
-        if !filtered_data.is_empty() {
-            date_filtered_data.insert(symbol, filtered_data);
-        }
-    }
-    
-    let symbol_count = date_filtered_data.len();
-    let symbols: Vec<_> = date_filtered_data.keys().cloned().collect();
-    let total_data_points: usize = date_filtered_data.values().map(|v| v.len()).sum();
-    
-    if use_last_day_only {
-        info!(symbol_count, symbols = ?symbols, total_data_points, "Returning ticker data (last day only)");
-    } else if params.all.unwrap_or(false) && start_date_filter.is_none() && end_date_filter.is_none() {
-        info!(symbol_count, symbols = ?symbols, total_data_points, "Returning all ticker data (all=true)");
     } else {
-        info!(symbol_count, symbols = ?symbols, total_data_points, start_date = ?params.start_date, end_date = ?params.end_date, "Returning ticker data with date filters");
+        // Fallback to regular OHLCV data if enhanced data is not available
+        info!("Enhanced data not available, falling back to regular OHLCV data");
+
+        let data = state.lock().await;
+        let filtered_data = filter_ohlcv_data(&data, &params);
+
+        let symbol_count = filtered_data.len();
+        let symbols: Vec<_> = filtered_data.keys().cloned().collect();
+        let total_data_points: usize = filtered_data.values().map(|v| v.len()).sum();
+
+        info!(symbol_count, symbols = ?symbols, total_data_points, "Returning fallback OHLCV data");
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+        (StatusCode::OK, headers, Json(filtered_data)).into_response()
     }
-    
-    let mut headers = HeaderMap::new();
-    headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
-    (StatusCode::OK, headers, Json(date_filtered_data)).into_response()
 }
 
 #[instrument(skip(data_state, token_state, last_update_state, headers), fields(symbol = %payload.symbol.as_deref().unwrap_or("unknown")))]
@@ -302,4 +273,158 @@ pub async fn health_handler(
     );
     
     (StatusCode::OK, Json(health_stats))
+}
+
+fn filter_enhanced_data(
+    enhanced_data: &crate::data_structures::EnhancedInMemoryData,
+    params: &TickerParams,
+) -> crate::data_structures::EnhancedInMemoryData {
+    use std::collections::HashMap;
+
+    let mut filtered_data = HashMap::new();
+
+    // Filter by symbols first
+    let target_symbols: Option<std::collections::HashSet<String>> = params.symbol
+        .as_ref()
+        .map(|symbols| symbols.iter().cloned().collect());
+
+    for (symbol, ticker_data) in enhanced_data.iter() {
+        // Skip if specific symbols are requested and this symbol is not in the list
+        if let Some(ref target_set) = target_symbols {
+            if !target_set.contains(symbol) {
+                continue;
+            }
+        }
+
+        let mut filtered_points = ticker_data.clone();
+
+        // Apply date filtering
+        if let Some(ref start_date_str) = params.start_date {
+            filtered_points.retain(|point| point.date >= *start_date_str);
+        }
+
+        if let Some(ref end_date_str) = params.end_date {
+            filtered_points.retain(|point| point.date <= *end_date_str);
+        }
+
+        // If no date filters and all=false, return only latest point
+        if params.start_date.is_none() && params.end_date.is_none() && !params.all.unwrap_or(false) {
+            if let Some(latest_point) = filtered_points.last() {
+                filtered_points = vec![latest_point.clone()];
+            }
+        }
+
+        if !filtered_points.is_empty() {
+            filtered_data.insert(symbol.clone(), filtered_points);
+        }
+    }
+
+    filtered_data
+}
+
+fn filter_ohlcv_data(
+    ohlcv_data: &crate::data_structures::InMemoryData,
+    params: &TickerParams,
+) -> crate::data_structures::InMemoryData {
+    use chrono::NaiveDate;
+    use std::collections::HashMap;
+
+    // Parse date filters
+    let start_date_filter = params.start_date.as_ref().and_then(|date_str| {
+        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+            .ok()
+            .map(|date| date.and_hms_opt(0, 0, 0).unwrap().and_utc())
+    });
+
+    let end_date_filter = params.end_date.as_ref().and_then(|date_str| {
+        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+            .ok()
+            .map(|date| date.and_hms_opt(23, 59, 59).unwrap().and_utc())
+    });
+
+    let use_last_day_only = start_date_filter.is_none() && end_date_filter.is_none() && !params.all.unwrap_or(false);
+
+    // Filter data by symbols first
+    let symbol_filtered_data = match &params.symbol {
+        Some(symbols) if !symbols.is_empty() => {
+            let mut filtered = HashMap::new();
+            for symbol in symbols {
+                if let Some(ticker_data) = ohlcv_data.get(symbol) {
+                    filtered.insert(symbol.clone(), ticker_data.clone());
+                }
+            }
+            filtered
+        }
+        _ => ohlcv_data.clone(),
+    };
+
+    // Apply date filtering
+    let mut date_filtered_data = HashMap::new();
+    for (symbol, ticker_data) in symbol_filtered_data {
+        let filtered_data: Vec<_> = if use_last_day_only {
+            ticker_data.into_iter().rev().take(1).collect()
+        } else {
+            ticker_data.into_iter()
+                .filter(|ohlcv| {
+                    let time_matches_start = start_date_filter.map_or(true, |start| ohlcv.time >= start);
+                    let time_matches_end = end_date_filter.map_or(true, |end| ohlcv.time <= end);
+                    time_matches_start && time_matches_end
+                })
+                .collect()
+        };
+
+        if !filtered_data.is_empty() {
+            date_filtered_data.insert(symbol, filtered_data);
+        }
+    }
+
+    date_filtered_data
+}
+
+fn format_enhanced_data_as_csv(data: crate::data_structures::EnhancedInMemoryData) -> String {
+    use std::io::Write;
+
+    let mut csv_content = Vec::new();
+
+    // Write header
+    writeln!(
+        csv_content,
+        "date,symbol,open,high,low,close,volume,ma10,ma20,ma50,moneyFlow,af,df,ts,score10,score20,score50"
+    ).unwrap();
+
+    // Write data rows
+    for (symbol, ticker_data) in data {
+        for point in ticker_data {
+            writeln!(
+                csv_content,
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                point.date,
+                symbol,
+                point.open,
+                point.high,
+                point.low,
+                point.close,
+                point.volume,
+                format_optional_f64(point.ma10),
+                format_optional_f64(point.ma20),
+                format_optional_f64(point.ma50),
+                format_optional_f64(point.money_flow),
+                format_optional_f64(point.af),
+                format_optional_f64(point.df),
+                format_optional_f64(point.ts),
+                format_optional_f64(point.score10),
+                format_optional_f64(point.score20),
+                format_optional_f64(point.score50),
+            ).unwrap();
+        }
+    }
+
+    String::from_utf8(csv_content).unwrap()
+}
+
+fn format_optional_f64(value: Option<f64>) -> String {
+    match value {
+        Some(v) => v.to_string(),
+        None => String::new(),
+    }
 }

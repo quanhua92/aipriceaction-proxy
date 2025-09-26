@@ -9,6 +9,59 @@ use tokio::sync::Mutex;
 use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
 use chrono_tz::Tz;
 
+// --- Enhanced Ticker Data Structures ---
+
+/// Enhanced ticker data with pre-calculated values
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedTickerData {
+    // Core OHLCV data
+    pub date: String,           // YYYY-MM-DD format
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: i64,
+
+    // Moving averages
+    pub ma10: Option<f64>,
+    pub ma20: Option<f64>,
+    pub ma50: Option<f64>,
+
+    // Money flow metrics
+    #[serde(rename = "moneyFlow")]
+    pub money_flow: Option<f64>,  // Percentage
+    pub af: Option<f64>,          // Activity flow
+    pub df: Option<f64>,          // Dollar flow
+    pub ts: Option<f64>,          // Trend score
+
+    // MA scores (percentage deviation from MA)
+    pub score10: Option<f64>,
+    pub score20: Option<f64>,
+    pub score50: Option<f64>,
+}
+
+/// Response metadata
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TickerResponseMeta {
+    pub timestamp: String,
+    pub calculated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<bool>,
+}
+
+/// Complete API response structure
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnhancedTickerResponse {
+    #[serde(rename = "_meta")]
+    pub meta: TickerResponseMeta,
+    #[serde(flatten)]
+    pub data: HashMap<String, Vec<EnhancedTickerData>>,
+}
+
+/// Enhanced in-memory data storage
+pub type EnhancedInMemoryData = HashMap<String, Vec<EnhancedTickerData>>;
+pub type SharedEnhancedData = Arc<Mutex<EnhancedInMemoryData>>;
+
 // --- Core Data Structures ---
 
 #[derive(Clone, Debug)]
