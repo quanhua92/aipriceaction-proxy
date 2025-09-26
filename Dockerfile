@@ -24,6 +24,7 @@ WORKDIR /app
 # Copy only dependency files for cargo-chef
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
+COPY ./cli ./cli
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2: Cache dependencies
@@ -34,6 +35,7 @@ ARG TARGETPLATFORM
 # Copy workspace structure for dependency building
 COPY --from=rust-planner /app/recipe.json recipe.json
 COPY ./Cargo.toml ./Cargo.toml
+COPY ./cli ./cli
 
 # Add Alpine build dependencies for this stage
 RUN apk add --no-cache \
@@ -68,6 +70,7 @@ RUN apk add --no-cache \
 COPY --from=rust-cacher /app/target target
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
+COPY ./cli ./cli
 COPY ./src ./src
 
 # Build for native musl target
