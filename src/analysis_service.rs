@@ -140,6 +140,7 @@ impl AnalysisService {
                     score50: ma_data.as_ref().and_then(|ma| ma.ma50_scores.get(&ohlcv.time).copied()),
                 };
 
+
                 enhanced_points.push(enhanced_point);
             }
 
