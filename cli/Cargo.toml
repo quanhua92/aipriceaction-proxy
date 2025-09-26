@@ -21,7 +21,7 @@ clap = { version = "4.4", features = ["derive"] }
 tokio = { version = "1.35", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 
 # CSV parsing
 csv = "1.3"
