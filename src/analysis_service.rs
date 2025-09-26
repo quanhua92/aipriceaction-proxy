@@ -32,23 +32,29 @@ impl AnalysisService {
     ) -> Result<HashMap<String, Vec<EnhancedTickerData>>, Box<dyn std::error::Error>> {
         tracing::info!("Starting fetch and calculate for {} tickers", tickers.len());
 
-        // 1. Fetch CSV data from GitHub
-        let ticker_data = self.csv_service.fetch_tickers(&tickers, &date_range).await?;
+        // 1. Fetch CSV data from GitHub using ALL range to get complete historical data
+        let fetch_range = DateRangeConfig::new(TimeRange::All);
+        let ticker_data = self.csv_service.fetch_tickers(&tickers, &fetch_range).await?;
         if ticker_data.is_empty() {
             return Ok(HashMap::new());
         }
 
-        // 2. Prepare date range for calculations
-        let dates = self.extract_date_range(&ticker_data);
+        // 2. Filter data by the requested calculation range to avoid massive computations
+        let filtered_data = self.filter_data_by_range(&ticker_data, &date_range);
+
+        // 3. Prepare date range for calculations (from filtered data)
+        let dates = self.extract_date_range(&filtered_data);
         if dates.is_empty() {
             return Ok(HashMap::new());
         }
 
-        tracing::info!("Processing {} dates for {} tickers", dates.len(), tickers.len());
+        tracing::info!("Processing {} dates for {} tickers (filtered from {} total downloaded)",
+                      dates.len(), tickers.len(),
+                      ticker_data.values().map(|v| v.len()).max().unwrap_or(0));
 
-        // 3. Calculate money flow
+        // 4. Calculate money flow on filtered data
         let money_flow_result = calculate_multiple_dates_vectorized(
-            &ticker_data,
+            &filtered_data,
             &tickers,
             &dates,
             None, // VNINDEX data if needed
@@ -56,7 +62,7 @@ impl AnalysisService {
             true,  // directional_colors
         );
 
-        // 4. Calculate MA scores
+        // 5. Calculate MA scores on filtered data
         let ma_config = MAScoreProcessConfig {
             date_range_config: date_range.clone(),
             days_back: dates.len(),
@@ -65,14 +71,14 @@ impl AnalysisService {
         };
 
         let (ma_scores, _metrics) = calculate_multiple_dates_vectorized_ma_score(
-            &ticker_data,
+            &filtered_data,
             &tickers,
             &dates,
             &ma_config,
         );
 
-        // 5. Merge all data into enhanced structure
-        let enhanced_data = self.merge_calculations(ticker_data, money_flow_result, ma_scores)?;
+        // 6. Merge all data into enhanced structure
+        let enhanced_data = self.merge_calculations(filtered_data, money_flow_result, ma_scores)?;
 
         // Update last update timestamp
         {
@@ -82,6 +88,20 @@ impl AnalysisService {
 
         tracing::info!("Successfully calculated enhanced data for {} tickers", enhanced_data.len());
         Ok(enhanced_data)
+    }
+
+    fn filter_data_by_range(
+        &self,
+        ticker_data: &HashMap<String, Vec<StockDataPoint>>,
+        date_range: &DateRangeConfig,
+    ) -> HashMap<String, Vec<StockDataPoint>> {
+        ticker_data
+            .iter()
+            .map(|(ticker, data_points)| {
+                let filtered_points = StockDataPoint::filter_by_date_range(data_points.clone(), date_range);
+                (ticker.clone(), filtered_points)
+            })
+            .collect()
     }
 
     fn extract_date_range(&self, ticker_data: &HashMap<String, Vec<StockDataPoint>>) -> Vec<String> {
