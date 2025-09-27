@@ -111,8 +111,9 @@ class APITester:
                 # Check for enhanced format
                 if 'data' in data:
                     return len(data['data']) == 1
-                # Check for direct format
-                return len(data) == 1
+                # Check for direct format (exclude _meta)
+                symbol_count = len([k for k in data.keys() if k != '_meta'])
+                return symbol_count == 1
             return False
         except:
             return False
@@ -125,8 +126,9 @@ class APITester:
                     # Check for enhanced format
                     if 'data' in data:
                         return len(data['data']) == expected_count
-                    # Check for direct format
-                    return len(data) == expected_count
+                    # Check for direct format (exclude _meta)
+                    symbol_count = len([k for k in data.keys() if k != '_meta'])
+                    return symbol_count == expected_count
                 return False
             except:
                 return False
@@ -139,8 +141,9 @@ class APITester:
                 # Check for enhanced format
                 if 'data' in data:
                     return len(data['data']) == 0
-                # Check for direct format
-                return len(data) == 0
+                # Check for direct format (exclude _meta)
+                symbol_count = len([k for k in data.keys() if k != '_meta'])
+                return symbol_count == 0
             return isinstance(data, list) and len(data) == 0
         except:
             return False
@@ -159,8 +162,8 @@ class APITester:
                     data = response.json()
 
                     # Check if it's enhanced data format
-                    if 'data' in data and ticker in data['data']:
-                        ticker_data = data['data'][ticker]
+                    if '_meta' in data and ticker in data:
+                        ticker_data = data[ticker]
                         if len(ticker_data) > 0:
                             print(f"\n🔹 {ticker}:")
                             # Show last 3 data points
@@ -540,14 +543,13 @@ class APITester:
         try:
             data = response.json()
 
-            # Check for enhanced format with metadata
-            if 'data' in data and 'meta' in data:
-                meta = data['meta']
+            # Check for actual API response format with _meta
+            if '_meta' in data:
+                meta = data['_meta']
                 if meta.get('calculated', False):
-                    # Check if enhanced calculations exist
-                    ticker_data = data['data']
-                    for symbol, points in ticker_data.items():
-                        if points:
+                    # Check if enhanced calculations exist in ticker data
+                    for symbol, points in data.items():
+                        if symbol != '_meta' and points:
                             first_point = points[0]
                             # Check for enhanced fields
                             has_enhanced = any(field in first_point for field in
@@ -642,14 +644,13 @@ def main():
             test_response = requests.get(f"{args.url}/tickers?symbol=VCB&all=true", timeout=5.0)
             if test_response.status_code == 200:
                 data = test_response.json()
-                # Check for enhanced format with metadata
-                if 'data' in data and 'meta' in data:
-                    meta = data['meta']
+                # Check for actual API response format with _meta
+                if '_meta' in data:
+                    meta = data['_meta']
                     if meta.get('calculated', False):
-                        # Check if enhanced calculations exist
-                        ticker_data = data['data']
-                        for symbol, points in ticker_data.items():
-                            if points:
+                        # Check if enhanced calculations exist in ticker data
+                        for symbol, points in data.items():
+                            if symbol != '_meta' and points:
                                 first_point = points[0]
                                 # Check for enhanced fields
                                 has_enhanced = any(field in first_point for field in
