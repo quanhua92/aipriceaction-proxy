@@ -147,6 +147,7 @@ pub fn calculate_multiple_dates_vectorized_ma_score(
     selected_tickers: &[String],
     date_range: &[String],
     config: &MAScoreProcessConfig,
+    excluded_tickers: &[String],
 ) -> (HashMap<String, Vec<MAScoreTickerData>>, MAScorePerformanceMetrics) {
     let logger = Logger::new("VECTORIZED_MA_SCORE");
     let timer = Timer::start("vectorized MA score calculation");
@@ -157,13 +158,20 @@ pub fn calculate_multiple_dates_vectorized_ma_score(
         date_range.len()
     ));
 
+    // Filter out excluded tickers
+    let filtered_tickers: Vec<String> = selected_tickers
+        .iter()
+        .filter(|ticker| !excluded_tickers.contains(ticker))
+        .cloned()
+        .collect();
+
     // Sort dates to ensure consistent calculations (chronological order)
     let mut sorted_date_range = date_range.to_vec();
     sorted_date_range.sort();
 
     // STEP 1: Vectorize ticker data into matrix format (same as money flow)
     // OPTIMIZATION: Only vectorize data for requested dates, not all historical data
-    let ticker_matrix = vectorize_ticker_data(ticker_data, selected_tickers, &sorted_date_range);
+    let ticker_matrix = vectorize_ticker_data(ticker_data, &filtered_tickers, &sorted_date_range);
 
     // STEP 2: Calculate MA scores for entire matrix in single vectorized operation
     let ma_score_matrix = calculate_ma_score_matrix(&ticker_matrix);
@@ -389,6 +397,7 @@ pub fn calculate_for_current_range(
         &filtered_tickers,
         date_range,
         config,
+        &[], // excluded_tickers (already filtered)
     )
 }
 
@@ -521,6 +530,7 @@ pub fn calculate_for_dates(
                 &filtered_tickers,
                 &calculation_date_range, // Use extended range for calculation
                 config,
+                &[], // excluded_tickers (already filtered)
             )
         };
 
@@ -583,6 +593,7 @@ pub fn calculate_for_dates(
         &filtered_tickers,
         dates,
         config,
+        &[], // excluded_tickers (already filtered)
     )
 }
 

@@ -62,6 +62,26 @@ pub struct EnhancedTickerResponse {
 pub type EnhancedInMemoryData = HashMap<String, Vec<EnhancedTickerData>>;
 pub type SharedEnhancedData = Arc<Mutex<EnhancedInMemoryData>>;
 
+// --- Shared CLI Cache Structure (Independent of State Machine Locks) ---
+
+/// Shared cache data that can be accessed independently of CLI state machine locks
+#[derive(Debug, Clone, Default)]
+pub struct SharedCLICache {
+    /// Money flow data by date
+    pub money_flow_data: HashMap<String, Vec<aipriceaction::utils::money_flow_utils::MoneyFlowTickerData>>,
+    /// MA score data by date  
+    pub ma_score_data: HashMap<String, Vec<aipriceaction::models::ma_score::MAScoreTickerData>>,
+    /// Ticker OHLCV data
+    pub ticker_data: HashMap<String, aipriceaction::models::TickerCacheEntry>,
+    /// Cache version for tracking updates
+    pub version: u64,
+    /// Last update timestamp
+    pub last_updated: Option<DateTime<Utc>>,
+}
+
+/// Shared CLI cache that can be accessed without state machine locks
+pub type SharedCLICacheData = Arc<Mutex<SharedCLICache>>;
+
 // --- Core Data Structures ---
 
 #[derive(Clone, Debug)]

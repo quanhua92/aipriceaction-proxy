@@ -94,6 +94,7 @@ impl AnalysisService {
                 None, // VNINDEX data if needed
                 false, // vnindex_volume_weighting
                 true,  // directional_colors
+                &["VNINDEX".to_string()], // excluded_tickers
             )
         }).await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -116,6 +117,7 @@ impl AnalysisService {
                 &tickers_clone,
                 &dates_clone,
                 &ma_config,
+                &["VNINDEX".to_string()], // excluded_tickers
             )
         }).await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -315,6 +317,7 @@ impl AnalysisService {
                     None, // VNINDEX data if needed
                     false, // vnindex_volume_weighting
                     true,  // directional_colors
+                    &["VNINDEX".to_string()], // excluded_tickers
                 )
             }).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -337,6 +340,7 @@ impl AnalysisService {
                     &tickers_clone,
                     &date_batch_clone,
                     &ma_config,
+                    &["VNINDEX".to_string()], // excluded_tickers
                 )
             }).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;

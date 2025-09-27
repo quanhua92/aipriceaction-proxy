@@ -27,10 +27,18 @@ pub fn calculate_multiple_dates_vectorized(
     vnindex_data: Option<&[StockDataPoint]>,
     vnindex_volume_weighting: bool,
     _directional_colors: bool,
+    excluded_tickers: &[String],
 ) -> MultipleDatesResult {
     let start_time = Instant::now();
 
-    if selected_tickers.is_empty() || date_range.is_empty() {
+    // Filter out excluded tickers
+    let filtered_tickers: Vec<String> = selected_tickers
+        .iter()
+        .filter(|ticker| !excluded_tickers.contains(ticker))
+        .cloned()
+        .collect();
+
+    if filtered_tickers.is_empty() || date_range.is_empty() {
         return MultipleDatesResult {
             results: HashMap::new(),
             metrics: PerformanceMetrics {
@@ -49,7 +57,7 @@ pub fn calculate_multiple_dates_vectorized(
     sorted_date_range.sort(); // Sort ascending (oldest first) to match matrix expectations
 
     // STEP 1: Vectorize ticker data into matrix format
-    let ticker_matrix = vectorize_ticker_data(ticker_data, selected_tickers, &sorted_date_range);
+    let ticker_matrix = vectorize_ticker_data(ticker_data, &filtered_tickers, &sorted_date_range);
 
     // STEP 2: Calculate money flows for entire matrix in single operation
     let money_flow_matrix = calculate_money_flow_matrix(&ticker_matrix, Some(ticker_data), true);
@@ -334,6 +342,7 @@ pub fn calculate_single_date_vectorized(
         vnindex_data,
         vnindex_volume_weighting,
         _directional_colors,
+        &["VNINDEX".to_string()], // excluded_tickers
     );
 
     let result = multiple_result.results

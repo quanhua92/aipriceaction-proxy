@@ -12,6 +12,7 @@ pub struct MoneyFlowState {
     #[allow(dead_code)]
     calculation_progress: usize,
     total_dates_to_process: usize,
+    excluded_tickers: Vec<String>,
 }
 
 impl MoneyFlowState {
@@ -20,6 +21,7 @@ impl MoneyFlowState {
             logger: Logger::new("MONEY_FLOW"),
             calculation_progress: 0,
             total_dates_to_process: 0,
+            excluded_tickers: vec!["VNINDEX".to_string()],
         }
     }
 }
@@ -229,6 +231,7 @@ impl MoneyFlowState {
             vnindex_data.as_deref(),
             true,  // Enable VNINDEX volume weighting
             true,  // Enable directional colors
+            &self.excluded_tickers,
         );
 
         self.logger.info(&format!(

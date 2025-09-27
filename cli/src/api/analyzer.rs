@@ -96,6 +96,7 @@ impl StockAnalyzer {
             None, // vnindex_data
             config.vnindex_volume_weighting,
             config.directional_colors,
+            &["VNINDEX".to_string()], // excluded_tickers
         );
 
         Ok(MoneyFlowAnalysisResult {
@@ -126,6 +127,7 @@ impl StockAnalyzer {
             &tickers,
             &date_range,
             &config,
+            &["VNINDEX".to_string()], // excluded_tickers
         );
 
         Ok(MAScoreAnalysisResult {
