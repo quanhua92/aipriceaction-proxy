@@ -34,6 +34,10 @@ pub async fn get_all_tickers_handler(
 
     // Try to get enhanced data first
     let enhanced_data = enhanced_state.lock().await;
+    let enhanced_ticker_count = enhanced_data.len();
+    let enhanced_data_points: usize = enhanced_data.values().map(|v| v.len()).sum();
+
+    debug!("Enhanced data check: {} tickers, {} total data points", enhanced_ticker_count, enhanced_data_points);
 
     if !enhanced_data.is_empty() {
         // Use enhanced data with calculations
@@ -43,7 +47,7 @@ pub async fn get_all_tickers_handler(
         let symbols: Vec<_> = filtered_data.keys().cloned().collect();
         let total_data_points: usize = filtered_data.values().map(|v| v.len()).sum();
 
-        info!(symbol_count, symbols = ?symbols, total_data_points, format, "Returning enhanced ticker data with calculations");
+        info!(symbol_count, total_data_points, format, "Returning enhanced ticker data with calculations");
 
         match format {
             "csv" => {
@@ -81,7 +85,7 @@ pub async fn get_all_tickers_handler(
         let symbols: Vec<_> = filtered_data.keys().cloned().collect();
         let total_data_points: usize = filtered_data.values().map(|v| v.len()).sum();
 
-        info!(symbol_count, symbols = ?symbols, total_data_points, format, "Returning fallback OHLCV data");
+        info!(symbol_count, total_data_points, format, "Returning fallback OHLCV data");
 
         match format {
             "csv" => {

@@ -167,7 +167,7 @@ class APITester:
                             for i, point in enumerate(ticker_data[-3:]):
                                 date = point.get('date', 'N/A')
                                 close = point.get('close', 'N/A')
-                                mf = point.get('money_flow', 'N/A')
+                                mf = point.get('moneyFlow', 'N/A')
                                 ma10 = point.get('ma10', 'N/A')
                                 ma20 = point.get('ma20', 'N/A')
                                 score10 = point.get('score10', 'N/A')
@@ -461,7 +461,7 @@ class APITester:
         print("\n" + "=" * 80)
         if success_rate >= 90:
             print("🎉 EXCELLENT: API is performing very well!")
-        elif success_rate >= 75:
+        elif success_rate >= 90:
             print("👍 GOOD: API is mostly functional with minor issues")
         elif success_rate >= 50:
             print("⚠️  WARNING: API has significant issues")
@@ -493,7 +493,7 @@ class APITester:
 
         # Store for debugging and return result
         self.last_success_rate = success_rate
-        result = success_rate >= 75
+        result = success_rate >= 90
         print(f"🔧 DEBUG: Returning {result} (success_rate={success_rate:.1f}%)")
         return result
 
@@ -533,7 +533,7 @@ class APITester:
         # Calculate results
         success_rate = self.calculate_and_print_summary()
         self.last_success_rate = success_rate
-        return success_rate >= 75
+        return success_rate >= 90
 
     def validate_enhanced_data(self, response: requests.Response) -> bool:
         """Validate that response contains enhanced calculations"""
@@ -551,7 +551,7 @@ class APITester:
                             first_point = points[0]
                             # Check for enhanced fields
                             has_enhanced = any(field in first_point for field in
-                                             ['money_flow', 'ma10', 'ma20', 'score10', 'score20'])
+                                             ['moneyFlow', 'ma10', 'ma20', 'score10', 'score20'])
                             if has_enhanced:
                                 return True
             return False
@@ -568,7 +568,7 @@ class APITester:
             # Check for enhanced CSV headers
             text = response.text
             header_line = text.split('\n')[0] if text else ""
-            enhanced_fields = ['ma10', 'ma20', 'money_flow', 'score10']
+            enhanced_fields = ['ma10', 'ma20', 'moneyFlow', 'score10']
             return any(field in header_line for field in enhanced_fields)
         except:
             return False
@@ -653,7 +653,7 @@ def main():
                                 first_point = points[0]
                                 # Check for enhanced fields
                                 has_enhanced = any(field in first_point for field in
-                                                 ['money_flow', 'ma10', 'ma20', 'score10'])
+                                                 ['moneyFlow', 'ma10', 'ma20', 'score10'])
                                 if has_enhanced:
                                     return True
             return False

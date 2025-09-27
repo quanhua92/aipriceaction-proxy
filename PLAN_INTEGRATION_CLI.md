@@ -3,16 +3,35 @@
 ## Executive Summary
 This document outlines the integration of the CLI module's analytical capabilities into the existing `/tickers` API endpoint to provide pre-calculated money flow and MA score values alongside OHLCV data, eliminating the need for client-side calculations.
 
+## ⚠️ CRITICAL ARCHITECTURAL ISSUE IDENTIFIED
+
+### Circular Dependency Problem
+**ISSUE**: The CLI module is currently configured to fetch data from `api.aipriceaction.com/tickers` - which is actually THIS SAME SERVER we're trying to enhance! This creates a circular dependency where:
+
+1. CLI tries to fetch from `/tickers` endpoint
+2. `/tickers` endpoint tries to use CLI for calculations
+3. CLI waits for `/tickers` response → **DEADLOCK**
+
+### Resolution Strategy
+**SOLUTION**: CLI must use **GitHub CSV files directly** as the primary data source for historical data, NOT the `/tickers` endpoint.
+
+### Immediate Action Plan
+1. **Phase 1**: ✅ Disable VCI live processing (DONE)
+2. **Phase 2**: 🔄 Update CLI configuration to use GitHub CSV directly
+3. **Phase 3**: 🔄 Integrate CLI analysis into background worker
+4. **Phase 4**: 🔄 Enhance /tickers API to serve calculated data
+5. **Phase 5**: ⏳ Re-enable VCI for live updates (FUTURE)
+
 ## Current Architecture Analysis
 
 ### Existing System
 - **API Endpoint**: `/tickers` returns raw OHLCV data
+- **Data Source**: VCI live API (3rd party) - **TEMPORARILY DISABLED**
 - **Data Structure**: `OhlcvData` with time, open, high, low, close, volume fields
-- **Data Source**: In-memory storage populated by worker and gossip protocols
 - **Response Format**: JSON object with ticker symbols as keys and arrays of data points
 
-### CLI Module Capabilities
-- **CSV Data Service**: Downloads and caches market data from GitHub
+### CLI Module Capabilities (CORRECTED)
+- **CSV Data Service**: Downloads and caches market data **DIRECTLY FROM GITHUB** (not from /tickers!)
 - **Money Flow Engine**: Vectorized calculations for money flow analysis
 - **MA Score Engine**: Moving average scoring across multiple periods (MA10, MA20, MA50)
 - **Performance**: High-speed matrix operations using Rust's rayon for parallelization
@@ -53,9 +72,9 @@ This document outlines the integration of the CLI module's analytical capabiliti
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Data Flow Architecture
+## Data Flow Architecture (CORRECTED)
 
-### 1. Background Data Processing
+### 1. Background Data Processing - HISTORICAL ONLY
 ```mermaid
 sequenceDiagram
     participant W as Worker
@@ -64,28 +83,33 @@ sequenceDiagram
     participant GH as GitHub
     participant MF as MoneyFlowEngine
     participant MA as MAScoreEngine
-    participant SD as SharedData
+    participant SD as SharedEnhancedData
+
+    Note over W: VCI Live Processing DISABLED
+    Note over W: Focus on Historical Data Only
 
     W->>AS: Trigger periodic update (5 min)
-    AS->>CSV: Request ticker data
+    AS->>CSV: Request ticker data (GitHub CSV ONLY)
     CSV->>CSV: Check local cache
     alt Cache miss or expired
-        CSV->>GH: Download CSV files
+        CSV->>GH: Download CSV files DIRECTLY
+        Note over CSV,GH: NO /tickers endpoint calls!
         GH-->>CSV: Return CSV data
         CSV->>CSV: Cache locally
     end
-    CSV-->>AS: Return StockDataPoints
+    CSV-->>AS: Return StockDataPoints (Historical)
 
-    par Money Flow Calculation
+    par Money Flow Calculation (Historical)
         AS->>MF: calculate_multiple_dates_vectorized()
         MF-->>AS: MoneyFlowTickerData
-    and MA Score Calculation
+    and MA Score Calculation (Historical)
         AS->>MA: calculate_multiple_dates_vectorized_ma_score()
         MA-->>AS: MAScoreTickerData
     end
 
     AS->>AS: Merge calculations with OHLCV
-    AS->>SD: Store EnhancedTickerData
+    AS->>SD: Store EnhancedTickerData (Historical)
+    Note over SD: Separate from Live OHLCV data
 ```
 
 ### 2. API Request Handling

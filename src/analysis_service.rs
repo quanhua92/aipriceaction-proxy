@@ -30,17 +30,18 @@ impl AnalysisService {
         tickers: Vec<String>,
         date_range: DateRangeConfig,
     ) -> Result<HashMap<String, Vec<EnhancedTickerData>>, Box<dyn std::error::Error>> {
-        tracing::info!("Starting fetch and calculate for {} tickers", tickers.len());
+        tracing::info!("Starting fetch and calculate for {} tickers with date_range: {:?}", tickers.len(), date_range);
 
-        // 1. Fetch CSV data from GitHub using ALL range to get complete historical data
-        let fetch_range = DateRangeConfig::new(TimeRange::All);
+        // 1. Fetch CSV data from GitHub using provided date range for enhanced data calculations
+        let fetch_range = date_range.clone();
+        tracing::debug!("About to call csv_service.fetch_tickers with range: {:?}", fetch_range);
         let ticker_data = self.csv_service.fetch_tickers(&tickers, &fetch_range).await?;
         if ticker_data.is_empty() {
             return Ok(HashMap::new());
         }
 
-        // 2. Filter data by the requested calculation range to avoid massive computations
-        let filtered_data = self.filter_data_by_range(&ticker_data, &date_range);
+        // 2. Data is already filtered by the requested range from fetch, no additional filtering needed
+        let filtered_data = ticker_data.clone();
 
         // 3. Prepare date range for calculations (from filtered data)
         let dates = self.extract_date_range(&filtered_data);
@@ -48,7 +49,7 @@ impl AnalysisService {
             return Ok(HashMap::new());
         }
 
-        tracing::info!("Processing {} dates for {} tickers (filtered from {} total downloaded)",
+        tracing::info!("Processing {} dates for {} tickers (downloaded {} points for largest ticker)",
                       dates.len(), tickers.len(),
                       ticker_data.values().map(|v| v.len()).max().unwrap_or(0));
 

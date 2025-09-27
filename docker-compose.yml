@@ -7,7 +7,7 @@ services:
     platform: linux/amd64
     container_name: aipriceaction-proxy
     ports:
-      - "8888:8888"
+      - "0.0.0.0:8888:8888"
     environment:
       - NODE_NAME=aipriceaction-proxy-docker
       - PRIMARY_TOKEN=docker-primary-token-12345
