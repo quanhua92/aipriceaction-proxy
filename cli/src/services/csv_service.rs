@@ -105,6 +105,16 @@ impl CSVDataService {
         Ok(data)
     }
 
+    /// Fetch VNINDEX data with 1Y range for faster startup
+    pub async fn fetch_vnindex_1y(&self) -> anyhow::Result<Vec<StockDataPoint>> {
+        self.logger.info("Loading VNINDEX data (1Y range)...");
+
+        let data = self.fetch_single_ticker("VNINDEX", &DateRangeConfig::new(TimeRange::OneYear)).await?;
+
+        self.logger.info(&format!("VNINDEX 1Y data loaded: {} points", data.len()));
+        Ok(data)
+    }
+
     /// Fetch ticker data with intelligent cache selection
     pub async fn fetch_tickers(
         &self,

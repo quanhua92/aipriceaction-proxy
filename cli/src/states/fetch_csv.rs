@@ -137,17 +137,29 @@ impl FetchCSVState {
 
         // Load VNINDEX if not already loaded
         if !context.cache.has_vnindex() {
-            self.logger.info("Loading VNINDEX data (ALL range)...");
+            // TEMPORARY: Use smaller date range for faster startup
+            self.logger.info("Loading VNINDEX data (1Y range for faster startup)...");
 
-            match self.csv_service.fetch_vnindex().await {
+            match self.csv_service.fetch_vnindex_1y().await {
                 Ok(vnindex_data) => {
                     let point_count = vnindex_data.len();
                     context.cache.set_vnindex(vnindex_data);
                     self.logger.info(&format!("VNINDEX loaded: {} points", point_count));
                 }
                 Err(e) => {
-                    self.logger.error(&format!("Failed to load VNINDEX data: {}", e));
-                    return Err(e);
+                    self.logger.warn(&format!("Failed to load VNINDEX 1Y data: {}, falling back to ALL range", e));
+                    // Fall back to original method
+                    match self.csv_service.fetch_vnindex().await {
+                        Ok(vnindex_data) => {
+                            let point_count = vnindex_data.len();
+                            context.cache.set_vnindex(vnindex_data);
+                            self.logger.info(&format!("VNINDEX loaded: {} points", point_count));
+                        }
+                        Err(e) => {
+                            self.logger.error(&format!("Failed to load VNINDEX data: {}", e));
+                            return Err(e);
+                        }
+                    }
                 }
             }
         }
