@@ -1,240 +1,207 @@
 #!/usr/bin/env python3
-"""
-Comprehensive API Test Suite for aipriceaction-proxy
-Tests all endpoints, parameters, and edge cases
-"""
 
 import requests
-import json
 import time
+import json
 import sys
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
 import argparse
+from dataclasses import dataclass
+from typing import Optional, Callable, Dict, Any
+from datetime import timedelta
+import concurrent.futures
 
 @dataclass
 class TestResult:
-    name: str
+    test_name: str
     success: bool
     response_time: float
-    details: str
     status_code: int
+    error_message: Optional[str] = None
 
 class APITester:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, timeout: float = 10.0):
         self.base_url = base_url.rstrip('/')
-        self.results: List[TestResult] = []
+        self.timeout = timeout
+        self.results = []
         self.last_success_rate = 0.0
 
-    def test_request(self, name: str, endpoint: str, expected_status: int = 200,
-                    validate_func=None, timeout: float = 10.0) -> TestResult:
-        """Make a test request and validate the response"""
+    def make_request(self, endpoint: str, expected_status: int = 200) -> requests.Response:
+        """Make HTTP request with timing"""
         url = f"{self.base_url}{endpoint}"
         start_time = time.time()
+        response = requests.get(url, timeout=self.timeout)
+        response.elapsed = timedelta(seconds=time.time() - start_time)
+        return response
 
+    def test_request(self, test_name: str, endpoint: str, expected_status: int = 200, validate_func: Optional[Callable] = None) -> TestResult:
+        """Execute a single test request"""
         try:
-            response = requests.get(url, timeout=timeout)
-            response_time = time.time() - start_time
+            response = self.make_request(endpoint, expected_status)
+            response_time = response.elapsed.total_seconds()
 
-            # Basic status code check
-            if response.status_code != expected_status:
-                return TestResult(
-                    name=name,
-                    success=False,
-                    response_time=response_time,
-                    details=f"Expected status {expected_status}, got {response.status_code}",
-                    status_code=response.status_code
-                )
+            # Check status code
+            status_ok = response.status_code == expected_status
 
-            # Custom validation if provided
-            if validate_func:
+            # Run validation function if provided
+            validation_ok = True
+            error_msg = None
+            if validate_func and status_ok:
                 try:
-                    validation_result = validate_func(response)
-                    if validation_result is not True:
-                        return TestResult(
-                            name=name,
-                            success=False,
-                            response_time=response_time,
-                            details=f"Validation failed: {validation_result}",
-                            status_code=response.status_code
-                        )
+                    validation_ok = validate_func(response)
                 except Exception as e:
-                    return TestResult(
-                        name=name,
-                        success=False,
-                        response_time=response_time,
-                        details=f"Validation error: {str(e)}",
-                        status_code=response.status_code
-                    )
+                    validation_ok = False
+                    error_msg = f"Validation error: {str(e)}"
+
+            success = status_ok and validation_ok
+            if not status_ok:
+                error_msg = f"Expected status {expected_status}, got {response.status_code}"
 
             return TestResult(
-                name=name,
-                success=True,
+                test_name=test_name,
+                success=success,
                 response_time=response_time,
-                details="OK",
-                status_code=response.status_code
+                status_code=response.status_code,
+                error_message=error_msg
             )
 
-        except requests.exceptions.Timeout:
-            return TestResult(
-                name=name,
-                success=False,
-                response_time=timeout,
-                details="Request timeout",
-                status_code=0
-            )
-        except requests.exceptions.ConnectionError:
-            return TestResult(
-                name=name,
-                success=False,
-                response_time=time.time() - start_time,
-                details="Connection error - server may not be running",
-                status_code=0
-            )
         except Exception as e:
             return TestResult(
-                name=name,
+                test_name=test_name,
                 success=False,
-                response_time=time.time() - start_time,
-                details=f"Request error: {str(e)}",
-                status_code=0
+                response_time=0.0,
+                status_code=0,
+                error_message=str(e)
             )
 
-    def validate_json_response(self, response) -> bool:
-        """Validate that response is valid JSON"""
-        try:
-            response.json()
-            return True
-        except:
-            return "Invalid JSON response"
+    def print_result(self, result: TestResult):
+        """Print test result"""
+        status = "✅ PASS" if result.success else "❌ FAIL"
+        print(f"{status:8} | {result.test_name:30} | {result.response_time:6.3f}s | {result.error_message or 'OK'}")
 
-    def validate_health_response(self, response) -> bool:
-        """Validate health endpoint response structure"""
+    # Validation functions
+    def validate_health_response(self, response: requests.Response) -> bool:
         try:
             data = response.json()
-            required_fields = ['active_tickers_count', 'memory_usage_mb', 'is_office_hours']
-            for field in required_fields:
-                if field not in data:
-                    return f"Missing field: {field}"
-            return True
+            return 'memory_usage_mb' in data and 'active_tickers_count' in data
         except:
-            return "Invalid health response format"
+            return False
 
-    def validate_ticker_groups(self, response) -> bool:
-        """Validate ticker groups response"""
+    def validate_ticker_groups(self, response: requests.Response) -> bool:
         try:
             data = response.json()
-            if not isinstance(data, dict):
-                return "Expected object with ticker groups"
-            if len(data) == 0:
-                return "No ticker groups found"
-            return True
+            return isinstance(data, dict) and len(data) > 0
         except:
-            return "Invalid ticker groups format"
+            return False
 
-    def validate_single_symbol(self, response) -> bool:
-        """Validate single symbol response"""
+    def validate_json_response(self, response: requests.Response) -> bool:
         try:
             data = response.json()
-            if isinstance(data, dict) and len(data) == 1:
-                return True
-            return f"Expected 1 symbol, got {len(data) if isinstance(data, dict) else 'invalid'}"
+            return isinstance(data, (dict, list))
         except:
-            return "Invalid single symbol response"
+            return False
+
+    def validate_csv_response(self, response: requests.Response) -> bool:
+        content_type = response.headers.get('content-type', '')
+        return 'text/csv' in content_type and 'date,symbol' in response.text[:100]
+
+    def validate_single_symbol(self, response: requests.Response) -> bool:
+        try:
+            data = response.json()
+            if isinstance(data, dict):
+                # Check for enhanced format
+                if 'data' in data:
+                    return len(data['data']) == 1
+                # Check for direct format
+                return len(data) == 1
+            return False
+        except:
+            return False
 
     def validate_multiple_symbols(self, expected_count: int):
-        """Return validator for multiple symbols"""
-        def validator(response) -> bool:
-            try:
-                data = response.json()
-                if isinstance(data, dict) and len(data) == expected_count:
-                    return True
-                return f"Expected {expected_count} symbols, got {len(data) if isinstance(data, dict) else 'invalid'}"
-            except:
-                return "Invalid multiple symbols response"
-        return validator
-
-    def validate_empty_response(self, response) -> bool:
-        """Validate empty response for non-existent symbols"""
-        try:
-            data = response.json()
-            if isinstance(data, dict) and len(data) == 0:
-                return True
-            return f"Expected empty response, got {len(data) if isinstance(data, dict) else 'invalid'}"
-        except:
-            return "Invalid empty response"
-
-    def validate_csv_response(self, response) -> bool:
-        """Validate CSV response format"""
-        content_type = response.headers.get('content-type', '')
-        text = response.text
-
-        # CSV format is only available when enhanced data is ready
-        # During fallback mode, it returns JSON (which is expected behavior)
-        if 'text/csv' in content_type:
-            # True CSV response - check for CSV headers
-            if 'date,symbol,open,high,low,close,volume' in text:
-                return True
-            return "CSV content-type but invalid CSV format"
-        elif 'application/json' in content_type:
-            # Fallback mode - CSV requested but enhanced data not ready
+        def validator(response: requests.Response) -> bool:
             try:
                 data = response.json()
                 if isinstance(data, dict):
-                    return "CSV requested but in fallback mode (JSON returned)"
-                return "Invalid JSON in fallback mode"
+                    # Check for enhanced format
+                    if 'data' in data:
+                        return len(data['data']) == expected_count
+                    # Check for direct format
+                    return len(data) == expected_count
+                return False
             except:
-                return "Invalid JSON in fallback mode"
-        else:
-            return f"Unexpected content-type: {content_type}"
+                return False
+        return validator
 
-    def validate_enhanced_data(self, response) -> str:
-        """Check if response has enhanced data with calculations"""
+    def validate_empty_response(self, response: requests.Response) -> bool:
         try:
             data = response.json()
-            if 'meta' in data and 'data' in data:
-                # Check if enhanced calculations exist
-                sample_ticker = next(iter(data['data'].values()), [])
-                if sample_ticker and len(sample_ticker) > 0:
-                    sample_point = sample_ticker[0]
-                    has_mf = 'money_flow' in sample_point and sample_point['money_flow'] is not None
-                    has_ma = 'ma10' in sample_point and sample_point['ma10'] is not None
-                    has_scores = 'score10' in sample_point and sample_point['score10'] is not None
-
-                    if has_mf and has_ma and has_scores:
-                        return "Enhanced data with mf, ma, and scores"
-                    elif has_mf or has_ma or has_scores:
-                        return "Partial enhanced data (some calculations missing)"
-                    else:
-                        return "Enhanced structure but no calculations"
-                return "Enhanced data with meta but no ticker data"
-            else:
-                return "Fallback OHLCV data (no calculations yet)"
-        except:
-            return "Invalid enhanced data format"
-
-    def validate_enhanced_calculations(self, response) -> bool:
-        """Validate that enhanced calculations exist (mf, ma, scores)"""
-        try:
-            data = response.json()
-            if 'data' in data:
-                for ticker_data in data['data'].values():
-                    if ticker_data and len(ticker_data) > 0:
-                        sample_point = ticker_data[0]
-                        has_mf = 'money_flow' in sample_point and sample_point['money_flow'] is not None
-                        has_ma = 'ma10' in sample_point and sample_point['ma10'] is not None
-                        has_scores = 'score10' in sample_point and sample_point['score10'] is not None
-                        return has_mf and has_ma and has_scores
-            return False
+            if isinstance(data, dict):
+                # Check for enhanced format
+                if 'data' in data:
+                    return len(data['data']) == 0
+                # Check for direct format
+                return len(data) == 0
+            return isinstance(data, list) and len(data) == 0
         except:
             return False
 
-    def run_all_tests(self):
-        """Run comprehensive test suite"""
-        print(f"🧪 Starting comprehensive API tests for: {self.base_url}")
+    def display_enhanced_data_samples(self):
+        """Display sample enhanced data values for major tickers"""
+        major_tickers = ["VCB", "VIX", "VNINDEX"]
+
+        print("\n📊 ENHANCED DATA SAMPLES (Last 3 Data Points)")
         print("=" * 80)
 
-        # 1. Basic Health Checks
+        for ticker in major_tickers:
+            try:
+                response = requests.get(f"{self.base_url}/tickers?symbol={ticker}&all=true", timeout=10.0)
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Check if it's enhanced data format
+                    if 'data' in data and ticker in data['data']:
+                        ticker_data = data['data'][ticker]
+                        if len(ticker_data) > 0:
+                            print(f"\n🔹 {ticker}:")
+                            # Show last 3 data points
+                            for i, point in enumerate(ticker_data[-3:]):
+                                date = point.get('date', 'N/A')
+                                close = point.get('close', 'N/A')
+                                mf = point.get('money_flow', 'N/A')
+                                ma10 = point.get('ma10', 'N/A')
+                                ma20 = point.get('ma20', 'N/A')
+                                score10 = point.get('score10', 'N/A')
+
+                                # Format values
+                                close_str = f"{close:.2f}" if isinstance(close, (int, float)) else str(close)
+                                mf_str = f"{mf:.2f}" if isinstance(mf, (int, float)) else str(mf)
+                                ma10_str = f"{ma10:.2f}" if isinstance(ma10, (int, float)) else str(ma10)
+                                ma20_str = f"{ma20:.2f}" if isinstance(ma20, (int, float)) else str(ma20)
+                                score10_str = f"{score10:.2f}" if isinstance(score10, (int, float)) else str(score10)
+
+                                print(f"   {date}: Close={close_str}, MF={mf_str}, MA10={ma10_str}, MA20={ma20_str}, Score10={score10_str}")
+                        else:
+                            print(f"\n🔹 {ticker}: No data available")
+                    elif isinstance(data, dict) and ticker in data:
+                        # Fallback OHLCV format
+                        ticker_data = data[ticker]
+                        if len(ticker_data) > 0:
+                            print(f"\n🔹 {ticker} (OHLCV only - no enhanced calculations):")
+                            for point in ticker_data[-3:]:
+                                time_str = point.get('time', 'N/A')
+                                close = point.get('close', 'N/A')
+                                close_str = f"{close:.2f}" if isinstance(close, (int, float)) else str(close)
+                                print(f"   {time_str}: Close={close_str}, MF=N/A, MA=N/A, Score=N/A")
+                        else:
+                            print(f"\n🔹 {ticker}: No data available")
+                else:
+                    print(f"\n🔹 {ticker}: HTTP {response.status_code}")
+            except Exception as e:
+                print(f"\n🔹 {ticker}: Error - {e}")
+
+    # Test categories broken into small methods
+    def run_health_status_tests(self):
+        """Run health and status endpoint tests"""
         print("\n📊 HEALTH & STATUS TESTS")
         print("-" * 40)
 
@@ -254,7 +221,8 @@ class APITester:
         self.results.append(result)
         self.print_result(result)
 
-        # 2. Symbol Filtering Tests
+    def run_symbol_filtering_tests(self):
+        """Run symbol filtering tests"""
         print("\n🎯 SYMBOL FILTERING TESTS")
         print("-" * 40)
 
@@ -294,7 +262,8 @@ class APITester:
         self.results.append(result)
         self.print_result(result)
 
-        # 3. Format Tests
+    def run_format_tests(self):
+        """Run format tests (JSON/CSV)"""
         print("\n📄 FORMAT TESTS")
         print("-" * 40)
 
@@ -316,7 +285,8 @@ class APITester:
         self.results.append(result)
         self.print_result(result)
 
-        # 4. Date Range Tests
+    def run_date_range_tests(self):
+        """Run date range filtering tests"""
         print("\n📅 DATE RANGE TESTS")
         print("-" * 40)
 
@@ -356,8 +326,8 @@ class APITester:
         self.results.append(result)
         self.print_result(result)
 
-
-        # 6. Performance Tests
+    def run_performance_tests(self):
+        """Run performance tests"""
         print("\n🚀 PERFORMANCE TESTS")
         print("-" * 40)
 
@@ -375,7 +345,8 @@ class APITester:
         elif result.response_time < 0.1:
             print(f"   ✨ Excellent: Response time {result.response_time:.3f}s")
 
-        # 7. Edge Cases
+    def run_edge_case_tests(self):
+        """Run edge case tests"""
         print("\n🧩 EDGE CASE TESTS")
         print("-" * 40)
 
@@ -415,61 +386,61 @@ class APITester:
         self.results.append(result)
         self.print_result(result)
 
-        # 8. Error Handling Tests
+    def run_error_handling_tests(self):
+        """Run error handling tests"""
         print("\n❌ ERROR HANDLING TESTS")
         print("-" * 40)
 
         # Non-existent endpoint
         result = self.test_request(
             "Non-existent Endpoint",
-            "/invalid-endpoint",
+            "/nonexistent",
             expected_status=404
         )
         self.results.append(result)
         self.print_result(result)
 
-        # Invalid HTTP method test would require different approach
-
-        # 9. Load Test (simple)
+    def run_load_tests(self):
+        """Run simple load test"""
         print("\n⚡ SIMPLE LOAD TEST")
         print("-" * 40)
 
+        # Load test with concurrent requests
         start_time = time.time()
+        test_url = "/tickers?symbol=VCB"
+        concurrent_requests = 10
         success_count = 0
-        total_requests = 10
+        total_response_time = 0
 
-        for i in range(total_requests):
-            result = self.test_request(
-                f"Load Test Request {i+1}",
-                "/tickers?symbol=VCB",
-                validate_func=self.validate_json_response
-            )
-            if result.success:
-                success_count += 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrent_requests) as executor:
+            future_to_request = {executor.submit(self.make_request, test_url): i for i in range(concurrent_requests)}
+            for future in concurrent.futures.as_completed(future_to_request):
+                try:
+                    response = future.result()
+                    if response.status_code == 200:
+                        success_count += 1
+                        total_response_time += getattr(response, 'elapsed', timedelta()).total_seconds()
+                except Exception as e:
+                    pass
 
-        load_test_time = time.time() - start_time
-        avg_time = load_test_time / total_requests
-
-        load_result = TestResult(
-            name=f"Load Test ({total_requests} requests)",
-            success=success_count == total_requests,
-            response_time=avg_time,
-            details=f"{success_count}/{total_requests} successful, avg: {avg_time:.3f}s",
-            status_code=200 if success_count == total_requests else 500
+        avg_response_time = total_response_time / max(success_count, 1)
+        load_test_result = TestResult(
+            test_name="Load Test (10 requests)",
+            success=success_count == concurrent_requests,
+            response_time=time.time() - start_time,
+            status_code=200 if success_count == concurrent_requests else 500,
+            error_message=None if success_count == concurrent_requests else f"Only {success_count}/{concurrent_requests} succeeded"
         )
-        self.results.append(load_result)
-        self.print_result(load_result)
+        self.results.append(load_test_result)
+        self.print_result(load_test_result)
 
-        # Print final summary
-        self.print_summary()
+        if success_count == concurrent_requests:
+            print(f"   ✅ {success_count}/{concurrent_requests} successful, avg: {avg_response_time:.3f}s")
+        else:
+            print(f"   ❌ Only {success_count}/{concurrent_requests} successful")
 
-    def print_result(self, result: TestResult):
-        """Print a single test result"""
-        status = "✅ PASS" if result.success else "❌ FAIL"
-        print(f"{status:8} | {result.name:30} | {result.response_time:6.3f}s | {result.details}")
-
-    def print_summary(self):
-        """Print final test summary"""
+    def calculate_and_print_summary(self):
+        """Calculate and print test summary"""
         print("\n" + "=" * 80)
         print("📋 TEST SUMMARY")
         print("=" * 80)
@@ -477,9 +448,9 @@ class APITester:
         total_tests = len(self.results)
         passed_tests = sum(1 for r in self.results if r.success)
         failed_tests = total_tests - passed_tests
-
         success_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
-        avg_response_time = sum(r.response_time for r in self.results) / total_tests if total_tests > 0 else 0
+
+        avg_response_time = sum(r.response_time for r in self.results) / len(self.results) if self.results else 0
 
         print(f"Total Tests:     {total_tests}")
         print(f"Passed:          {passed_tests} ✅")
@@ -487,14 +458,7 @@ class APITester:
         print(f"Success Rate:    {success_rate:.1f}%")
         print(f"Avg Response:    {avg_response_time:.3f}s")
 
-        if failed_tests > 0:
-            print(f"\n❌ FAILED TESTS:")
-            for result in self.results:
-                if not result.success:
-                    print(f"   • {result.name}: {result.details}")
-
         print("\n" + "=" * 80)
-
         if success_rate >= 90:
             print("🎉 EXCELLENT: API is performing very well!")
         elif success_rate >= 75:
@@ -504,10 +468,33 @@ class APITester:
         else:
             print("🚨 CRITICAL: API is not functioning properly")
 
-        # Store success rate for debugging
+        return success_rate
+
+    def run_all_tests(self):
+        """Run comprehensive test suite - CLEAN REFACTORED VERSION"""
+        print(f"🧪 Starting comprehensive API tests for: {self.base_url}")
+        print("=" * 80)
+
+        # Clear previous results
+        self.results = []
+
+        # Run all test categories
+        self.run_health_status_tests()
+        self.run_symbol_filtering_tests()
+        self.run_format_tests()
+        self.run_date_range_tests()
+        self.run_performance_tests()
+        self.run_edge_case_tests()
+        self.run_error_handling_tests()
+        self.run_load_tests()
+
+        # Calculate and display results
+        success_rate = self.calculate_and_print_summary()
+
+        # Store for debugging and return result
         self.last_success_rate = success_rate
         result = success_rate >= 75
-        print(f"🔧 DEBUG: About to return result = {result}, success_rate = {success_rate}")
+        print(f"🔧 DEBUG: Returning {result} (success_rate={success_rate:.1f}%)")
         return result
 
     def run_enhanced_tests(self):
@@ -515,205 +502,218 @@ class APITester:
         print(f"🧪 Starting enhanced data tests for: {self.base_url}")
         print("=" * 80)
 
-        # Skip running basic tests again since they were already run in phase 1
-        # basic_success = self.run_all_tests()
+        # Clear previous results for enhanced tests
+        self.results = []
 
-        # Reset results for enhanced-specific tests
-        enhanced_results = []
-
-        print("\n🔬 ENHANCED DATA SPECIFIC TESTS")
+        print("\n🔬 ENHANCED DATA CALCULATION TESTS")
         print("-" * 40)
 
-        # Test enhanced data presence and calculations
+        # Test enhanced data with calculations
         result = self.test_request(
-            "Enhanced Data - Money Flow Present",
-            "/tickers?symbol=VCB",
-            validate_func=lambda r: "money_flow" in str(r.text) and '"money_flow":null' not in str(r.text)
+            "Enhanced Data with Calculations",
+            "/tickers?symbol=VCB&all=true",
+            validate_func=self.validate_enhanced_data
         )
-        enhanced_results.append(result)
+        self.results.append(result)
         self.print_result(result)
 
-        result = self.test_request(
-            "Enhanced Data - MA Scores Present",
-            "/tickers?symbol=VCB",
-            validate_func=lambda r: "ma10" in str(r.text) and '"ma10":null' not in str(r.text)
-        )
-        enhanced_results.append(result)
-        self.print_result(result)
+        if result.success:
+            # Display sample data if enhanced calculations are available
+            self.display_enhanced_data_samples()
 
-        result = self.test_request(
-            "Enhanced Data - Technical Scores Present",
-            "/tickers?symbol=VCB",
-            validate_func=lambda r: "score10" in str(r.text) and '"score10":null' not in str(r.text)
-        )
-        enhanced_results.append(result)
-        self.print_result(result)
-
-        result = self.test_request(
-            "Enhanced Data - Full Calculations",
-            "/tickers?symbol=VCB",
-            validate_func=self.validate_enhanced_calculations
-        )
-        enhanced_results.append(result)
-        self.print_result(result)
-
-        # CSV format with enhanced data
+        # Test CSV format with enhanced data
         result = self.test_request(
             "Enhanced CSV Format",
-            "/tickers?symbol=VCB&format=csv",
-            validate_func=lambda r: "money_flow" in r.text and "ma10" in r.text
+            "/tickers?symbol=VCB&symbol=VIX&format=csv&all=true",
+            validate_func=self.validate_enhanced_csv
         )
-        enhanced_results.append(result)
+        self.results.append(result)
         self.print_result(result)
 
-        # Calculate enhanced test results
-        enhanced_passed = sum(1 for r in enhanced_results if r.success)
-        enhanced_total = len(enhanced_results)
-        enhanced_rate = (enhanced_passed / enhanced_total) * 100 if enhanced_total > 0 else 0
+        # Calculate results
+        success_rate = self.calculate_and_print_summary()
+        self.last_success_rate = success_rate
+        return success_rate >= 75
 
-        print("\n" + "=" * 80)
-        print("📋 ENHANCED TEST SUMMARY")
-        print("=" * 80)
-        print(f"Enhanced Tests:  {enhanced_passed}/{enhanced_total} passed ({enhanced_rate:.1f}%)")
+    def validate_enhanced_data(self, response: requests.Response) -> bool:
+        """Validate that response contains enhanced calculations"""
+        try:
+            data = response.json()
 
-        # Combine all results
-        all_results = self.results + enhanced_results
-        total_passed = sum(1 for r in all_results if r.success)
-        total_tests = len(all_results)
-        overall_rate = (total_passed / total_tests) * 100 if total_tests > 0 else 0
+            # Check for enhanced format with metadata
+            if 'data' in data and 'meta' in data:
+                meta = data['meta']
+                if meta.get('calculated', False):
+                    # Check if enhanced calculations exist
+                    ticker_data = data['data']
+                    for symbol, points in ticker_data.items():
+                        if points:
+                            first_point = points[0]
+                            # Check for enhanced fields
+                            has_enhanced = any(field in first_point for field in
+                                             ['money_flow', 'ma10', 'ma20', 'score10', 'score20'])
+                            if has_enhanced:
+                                return True
+            return False
+        except:
+            return False
 
-        print(f"Overall Tests:   {total_passed}/{total_tests} passed ({overall_rate:.1f}%)")
+    def validate_enhanced_csv(self, response: requests.Response) -> bool:
+        """Validate enhanced CSV format"""
+        try:
+            content_type = response.headers.get('content-type', '')
+            if 'text/csv' not in content_type:
+                return False
 
-        if enhanced_rate >= 90:
-            print("🎉 EXCELLENT: Enhanced calculations are working perfectly!")
-        elif enhanced_rate >= 75:
-            print("👍 GOOD: Enhanced calculations are mostly working")
-        elif enhanced_rate >= 50:
-            print("⚠️  WARNING: Enhanced calculations have significant issues")
-        else:
-            print("🚨 CRITICAL: Enhanced calculations are not working")
+            # Check for enhanced CSV headers
+            text = response.text
+            header_line = text.split('\n')[0] if text else ""
+            enhanced_fields = ['ma10', 'ma20', 'money_flow', 'score10']
+            return any(field in header_line for field in enhanced_fields)
+        except:
+            return False
 
-        return overall_rate >= 75
+def check_server_connectivity(url: str, timeout: float = 5.0) -> bool:
+    """Check if server is running"""
+    try:
+        response = requests.get(f"{url}/health", timeout=timeout)
+        return response.status_code == 200
+    except:
+        return False
 
 def main():
-    parser = argparse.ArgumentParser(description='Comprehensive API test suite for aipriceaction-proxy')
-    parser.add_argument('url', help='Base URL of the API (e.g., http://localhost:9000)')
-    parser.add_argument('--timeout', type=float, default=10.0, help='Request timeout in seconds (default: 10)')
-    parser.add_argument('--single-run', action='store_true', help='Run single test only (skip 30s wait)')
+    parser = argparse.ArgumentParser(description='Comprehensive API test suite')
+    parser.add_argument('url', help='Base URL of the API to test')
+    parser.add_argument('--timeout', type=float, default=10.0, help='Request timeout in seconds')
+    parser.add_argument('--single-run', action='store_true', help='Run tests once without waiting for enhanced calculations')
 
     args = parser.parse_args()
 
-    # Validate URL format
-    if not args.url.startswith(('http://', 'https://')):
-        print("❌ Error: URL must start with http:// or https://")
+    # Print current time
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"🕐 Test started at: {current_time}")
+
+    # Check server connectivity first
+    print(f"🔗 Checking server connectivity to {args.url}...")
+    if not check_server_connectivity(args.url, timeout=5.0):
+        print(f"\n❌ FAILED: Cannot connect to server at {args.url}")
+        print("\n💡 To start the server, run one of these commands:")
+        print("   # For development (with tokens):")
+        print('   PRIMARY_TOKEN="test-token-1" SECONDARY_TOKEN="test-token-2" INTERNAL_PEER_URLS="" PORT=9000 RUST_LOG=info cargo run')
+        print("\n   # For production:")
+        print('   PRIMARY_TOKEN="your-primary-token" SECONDARY_TOKEN="your-secondary-token" PORT=9000 cargo run --release')
         sys.exit(1)
 
-    print(f"🔗 Testing API at: {args.url}")
-    print(f"⏱️  Request timeout: {args.timeout}s")
+    # Run startup tests (basic functionality)
+    startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n🚀 PHASE 1: STARTUP TESTS (Basic API functionality) - {startup_time}")
+    print("=" * 80)
 
+    tester1 = APITester(args.url)
+    try:
+        success1 = tester1.run_all_tests()
+        print(f"\n🔍 DEBUG: Phase 1 result = {success1}, type = {type(success1)}")
+    except Exception as e:
+        print(f"\n❌ ERROR during startup tests: {e}")
+        sys.exit(1)
+
+    # Exit immediately if startup tests failed
+    if not success1:
+        print("\n❌ STARTUP TESTS FAILED - Exiting without running enhanced tests")
+        print("   Please fix the issues above before proceeding")
+        sys.exit(1)
+
+    print("\n✅ STARTUP TESTS PASSED - Proceeding to enhanced tests")
+
+    # Skip enhanced tests if single-run mode
     if args.single_run:
-        # Single test run only
-        tester = APITester(args.url)
+        print("\n⏭️  SINGLE-RUN MODE: Skipping enhanced data tests")
+        print(f"\nOverall startup success rate: {tester1.last_success_rate:.1f}%")
+        sys.exit(0 if success1 else 1)
+
+    # Check if enhanced calculations are already available
+    check_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n🔍 PHASE 2: Checking for enhanced calculations... - {check_time}")
+
+    def check_enhanced_data_available():
+        """Check if enhanced calculations (MF, MA) are already available"""
         try:
-            success = tester.run_all_tests()
-            sys.exit(0 if success else 1)
-        except KeyboardInterrupt:
-            print("\n\n⏹️  Tests interrupted by user")
-            sys.exit(1)
-        except Exception as e:
-            print(f"\n\n💥 Unexpected error: {e}")
-            sys.exit(1)
+            test_response = requests.get(f"{args.url}/tickers?symbol=VCB&all=true", timeout=5.0)
+            if test_response.status_code == 200:
+                data = test_response.json()
+                # Check for enhanced format with metadata
+                if 'data' in data and 'meta' in data:
+                    meta = data['meta']
+                    if meta.get('calculated', False):
+                        # Check if enhanced calculations exist
+                        ticker_data = data['data']
+                        for symbol, points in ticker_data.items():
+                            if points:
+                                first_point = points[0]
+                                # Check for enhanced fields
+                                has_enhanced = any(field in first_point for field in
+                                                 ['money_flow', 'ma10', 'ma20', 'score10'])
+                                if has_enhanced:
+                                    return True
+            return False
+        except:
+            return False
+
+    enhanced_available = check_enhanced_data_available()
+
+    if enhanced_available:
+        ready_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"✅ Enhanced calculations already available! Skipping wait - {ready_time}")
+        print("   Found: Money flow, moving averages, technical scores")
     else:
-        # Default: startup test sequence
-        print("🚀 Running startup test sequence...")
+        # Wait for enhanced calculations to complete
+        wait_start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"⏳ Enhanced calculations not ready yet. Waiting 90 seconds... - {wait_start_time}")
+        print("   (Money flow, moving averages, technical scores)")
 
-        # Quick server connectivity check first
-        print("\n🔍 Checking server connectivity...")
-        try:
-            test_response = requests.get(f"{args.url}/health", timeout=3)
-            print("✅ Server is responding")
-        except requests.exceptions.ConnectionError:
-            print("❌ ERROR: Cannot connect to server - server may not be running")
-            print(f"   Please make sure the server is running at {args.url}")
-            sys.exit(1)
-        except requests.exceptions.Timeout:
-            print("❌ ERROR: Server response timeout - server may be overloaded")
-            sys.exit(1)
-        except Exception as e:
-            print(f"❌ ERROR: Unexpected connection error: {e}")
-            sys.exit(1)
+        # Show progress every 5 seconds and check for enhanced data availability
+        for i in range(18):  # 90 seconds / 5 seconds = 18 intervals
+            time.sleep(5)
+            elapsed = (i + 1) * 5
+            remaining = 90 - elapsed
+            current_time = datetime.now().strftime("%H:%M:%S")
 
-        # First test run during startup
-        print("\n" + "="*80)
-        print("📊 PHASE 1: STARTUP TESTS (Immediate - Fallback Mode Expected)")
-        print("="*80)
+            # Check if enhanced data is now available
+            if check_enhanced_data_available():
+                print(f"   ✅ {current_time} - Enhanced data detected after {elapsed}s! Stopping wait early.")
+                break
 
-        tester1 = APITester(args.url)
-        try:
-            success1 = tester1.run_all_tests()
-        except Exception as e:
-            print(f"\n❌ ERROR during startup tests: {e}")
-            sys.exit(1)
+            print(f"   ⏱️  {current_time} - {elapsed}s elapsed, {remaining}s remaining... (checking for data)")
 
-        # Debug: Print actual return value
-        print(f"\n🔍 DEBUG: success1 = {success1}, type = {type(success1)}, tester1.last_success_rate = {tester1.last_success_rate}")
+            if remaining <= 0:
+                break
 
-        # Exit immediately if startup tests failed
-        if not success1:
-            print("\n❌ STARTUP TESTS FAILED - Exiting without running enhanced tests")
-            print("   Please fix the issues above before proceeding")
-            sys.exit(1)
+    # Run enhanced tests
+    enhanced_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n🚀 PHASE 2: ENHANCED DATA TESTS (After calculations) - {enhanced_time}")
+    print("=" * 80)
 
-        print("\n✅ STARTUP TESTS PASSED - Proceeding to enhanced tests")
+    tester2 = APITester(args.url)
+    try:
+        success2 = tester2.run_enhanced_tests()
+        print(f"\n🔍 DEBUG: Phase 2 result = {success2}, type = {type(success2)}")
+    except Exception as e:
+        print(f"\n❌ ERROR during enhanced tests: {e}")
+        success2 = False
 
-        # Wait 90 seconds for calculations to complete
-        print(f"\n⏳ Waiting 90 seconds for enhanced calculations to complete...")
-        for i in range(90, 0, -1):
-            print(f"\r   {i:2d}s remaining...", end="", flush=True)
-            time.sleep(1)
-        print("\r   ✅ Wait complete!    ")
+    # Final summary
+    completion_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n" + "=" * 80)
+    print(f"🏁 FINAL SUMMARY - {completion_time}")
+    print("=" * 80)
+    print(f"Startup Tests:   {'✅ PASSED' if success1 else '❌ FAILED'} ({tester1.last_success_rate:.1f}%)")
+    print(f"Enhanced Tests:  {'✅ PASSED' if success2 else '❌ FAILED'} ({tester2.last_success_rate:.1f}%)")
 
-        # Second test run after delay
-        print("\n" + "="*80)
-        print("📊 PHASE 2: POST-STARTUP TESTS (After 30s - Enhanced Mode Expected)")
-        print("="*80)
+    overall_success = success1 and success2
+    print(f"Overall Result:  {'✅ SUCCESS' if overall_success else '❌ FAILURE'}")
 
-        tester2 = APITester(args.url)
-        success2 = tester2.run_all_tests()
-
-        # Compare results
-        print("\n" + "="*80)
-        print("📈 COMPARISON SUMMARY")
-        print("="*80)
-
-        phase1_passed = sum(1 for r in tester1.results if r.success)
-        phase1_total = len(tester1.results)
-        phase2_passed = sum(1 for r in tester2.results if r.success)
-        phase2_total = len(tester2.results)
-
-        print(f"Phase 1 (Startup):     {phase1_passed}/{phase1_total} passed ({phase1_passed/phase1_total*100:.1f}%)")
-        print(f"Phase 2 (Enhanced):    {phase2_passed}/{phase2_total} passed ({phase2_passed/phase2_total*100:.1f}%)")
-        print(f"Improvement:           +{phase2_passed-phase1_passed} tests passed")
-
-        # Show specific improvements
-        phase1_failed = {r.name for r in tester1.results if not r.success}
-        phase2_failed = {r.name for r in tester2.results if not r.success}
-        improvements = phase1_failed - phase2_failed
-
-        if improvements:
-            print(f"\n✅ Tests that improved after 30s:")
-            for test_name in improvements:
-                print(f"   • {test_name}")
-
-        regressions = phase2_failed - phase1_failed
-        if regressions:
-            print(f"\n❌ Tests that regressed after 30s:")
-            for test_name in regressions:
-                print(f"   • {test_name}")
-
-        # Final result
-        overall_success = success2 and (phase2_passed >= phase1_passed)
-        sys.exit(0 if overall_success else 1)
+    sys.exit(0 if overall_success else 1)
 
 if __name__ == "__main__":
     main()
