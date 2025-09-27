@@ -1,7 +1,7 @@
 use crate::config::{AppConfig, load_ticker_groups};
-use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info, get_current_time, SharedEnhancedData};
+use crate::data_structures::{InMemoryData, SharedData, SharedOfficeHoursState, OfficeHoursState, is_within_office_hours, get_current_interval, SharedHealthStats, get_time_info, SharedEnhancedData};
 use crate::analysis_service::AnalysisService;
-use aipriceaction::{prelude::*, data::TimeRange};
+use aipriceaction::{prelude::*, data::TimeRange, state_machine::ClientDataStateMachine};
 use std::time::Duration;
 use std::sync::Arc;
 use reqwest::Client as ReqwestClient;
@@ -69,19 +69,20 @@ async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedDat
     let mut iteration_count = 0;
     let start_time = std::time::Instant::now();
 
-    // Initialize analysis service for calculations
-    let analysis_service: Option<Arc<AnalysisService>> = match AnalysisService::new() {
-        Ok(service) => {
-            info!("Analysis service initialized successfully");
-            Some(Arc::new(service))
+    // Initialize CLI state machine for calculations
+    let state_machine = Arc::new(Mutex::new(ClientDataStateMachine::new()));
+    info!("CLI state machine initialized successfully");
+    
+    // Start state machine in background
+    let state_machine_clone = Arc::clone(&state_machine);
+    tokio::spawn(async move {
+        info!("Starting CLI state machine in background");
+        if let Err(e) = state_machine_clone.lock().await.start().await {
+            error!(?e, "CLI state machine failed");
         }
-        Err(e) => {
-            error!(?e, "Failed to initialize analysis service - calculations will be disabled");
-            None
-        }
-    };
-
-    let mut last_calculation_time = std::time::Instant::now();
+    });
+    
+    let mut last_enhanced_update = std::time::Instant::now() - std::time::Duration::from_secs(60); // Start with 60 seconds ago to trigger first update immediately
 
     loop {
         iteration_count += 1;
@@ -224,24 +225,31 @@ async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedDat
             }
         }
 
-        // Update enhanced data with calculations every 30 seconds (for testing)
-        const CALCULATION_INTERVAL: Duration = Duration::from_secs(30); // 30 seconds for testing
-        if analysis_service.is_some() && last_calculation_time.elapsed() > CALCULATION_INTERVAL {
-            info!(iteration = iteration_count, "Starting calculation update for enhanced data");
+        // Update enhanced data from state machine every 10 seconds
+        const ENHANCED_UPDATE_INTERVAL: Duration = Duration::from_secs(10); // 10 seconds
+        if last_enhanced_update.elapsed() > ENHANCED_UPDATE_INTERVAL {
+            info!(iteration = iteration_count, "Starting enhanced data update from state machine");
 
-            if let Some(ref service) = analysis_service {
-                match update_enhanced_data(
-                    enhanced_data.clone(),
-                    Arc::clone(service),
-                    all_tickers.clone()
-                ).await {
-                    Ok(count) => {
-                        info!(enhanced_tickers = count, "Successfully updated enhanced data calculations");
-                        last_calculation_time = std::time::Instant::now();
+            match update_enhanced_data_from_state_machine(
+                enhanced_data.clone(),
+                Arc::clone(&state_machine)
+            ).await {
+                Ok(count) => {
+                    info!(enhanced_tickers = count, "Successfully updated enhanced data from state machine");
+                    last_enhanced_update = std::time::Instant::now();
+                    
+                    // Test: Check if enhanced data is actually stored
+                    {
+                        let test_data = enhanced_data.lock().await;
+                        info!(stored_dates = test_data.len(), "Enhanced data storage verification");
+                        if !test_data.is_empty() {
+                            let sample_dates: Vec<String> = test_data.keys().take(3).cloned().collect();
+                            info!(sample_dates = ?sample_dates, "Sample stored dates");
+                        }
                     }
-                    Err(e) => {
-                        error!(?e, "Failed to update enhanced data calculations");
-                    }
+                }
+                Err(e) => {
+                    error!(?e, "Failed to update enhanced data from state machine");
                 }
             }
         }
@@ -253,6 +261,253 @@ async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedDat
         all_tickers.shuffle(&mut rand::rng());
         debug!("Reshuffled tickers for next iteration");
     }
+}
+
+async fn update_enhanced_data_from_state_machine(
+    enhanced_data: SharedEnhancedData,
+    state_machine: Arc<Mutex<ClientDataStateMachine>>,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    tracing::info!("Starting enhanced data update from CLI state machine");
+    
+    // Get data from state machine cache
+    let (money_flow_data, ma_score_data, ticker_data) = {
+        let state_machine_guard = state_machine.lock().await;
+        let context = state_machine_guard.get_context();
+        let context_guard = context.read().await;
+        let cache = &context_guard.cache;
+        
+        // Extract money flow data
+        let money_flow_data = cache.get_money_flow_data(None).unwrap_or_default();
+        
+        // Extract MA score data
+        let ma_score_data = cache.get_ma_score_data(None, None).unwrap_or_default();
+        
+        // Extract ticker data for OHLCV values
+        let client_cache = cache.get_cache();
+        let ticker_data = client_cache.ticker_data.clone();
+        
+        (money_flow_data, ma_score_data, ticker_data)
+    };
+    
+    tracing::info!(
+        money_flow_tickers = money_flow_data.len(),
+        ma_score_tickers = ma_score_data.len(),
+        ticker_count = ticker_data.len(),
+        "Extracted data from state machine cache"
+    );
+    
+    // Debug: Log first few tickers to verify data structure
+    if !money_flow_data.is_empty() {
+        tracing::info!(
+            first_money_flow_tickers = ?money_flow_data.iter().take(3).map(|mf| &mf.ticker).collect::<Vec<_>>(),
+            "Sample money flow tickers"
+        );
+    }
+    if !ma_score_data.is_empty() {
+        tracing::info!(
+            first_ma_score_tickers = ?ma_score_data.iter().take(3).map(|ma| &ma.ticker).collect::<Vec<_>>(),
+            "Sample MA score tickers"
+        );
+    }
+    if !ticker_data.is_empty() {
+        tracing::info!(
+            first_ticker_data_keys = ?ticker_data.keys().take(3).collect::<Vec<_>>(),
+            "Sample ticker data keys"
+        );
+    }
+    
+    // Convert CLI data structures to enhanced data structures
+    let mut enhanced_data_map = std::collections::HashMap::new();
+    
+    // Group money flow data by date
+    let mut money_flow_by_date = std::collections::HashMap::new();
+    for mf_ticker in money_flow_data {
+        for (date, money_flow_value) in &mf_ticker.daily_data {
+            money_flow_by_date
+                .entry(date.clone())
+                .or_insert_with(Vec::new)
+                .push(mf_ticker.clone());
+        }
+    }
+    
+    // Group MA score data by date
+    let mut ma_score_by_date = std::collections::HashMap::new();
+    for ma_ticker in ma_score_data {
+        // Collect all dates from MA score data
+        let all_dates: Vec<String> = ma_ticker.ma10_scores.keys()
+            .chain(ma_ticker.ma20_scores.keys())
+            .chain(ma_ticker.ma50_scores.keys())
+            .cloned()
+            .collect();
+        
+        for date in all_dates {
+            ma_score_by_date
+                .entry(date.clone())
+                .or_insert_with(Vec::new)
+                .push(ma_ticker.clone());
+        }
+    }
+    
+    // Process money flow data
+    for (date, money_flow_tickers) in money_flow_by_date {
+        let mut enhanced_tickers = Vec::new();
+        
+        for mf_ticker in money_flow_tickers {
+            // Skip VNINDEX in enhanced calculations
+            if mf_ticker.ticker == "VNINDEX" {
+                continue;
+            }
+            
+            // Get corresponding ticker data for OHLCV values
+            if let Some(ticker_entry) = ticker_data.get(&mf_ticker.ticker) {
+                // Find the data point for this specific date
+                if let Some(ohlcv_point) = ticker_entry.data.iter().find(|p| p.time == date) {
+                    let enhanced_ticker = crate::data_structures::EnhancedTickerData {
+                        date: date.clone(),
+                        open: ohlcv_point.open,
+                        high: ohlcv_point.high,
+                        low: ohlcv_point.low,
+                        close: ohlcv_point.close,
+                        volume: ohlcv_point.volume,
+                        
+                        // Moving averages (will be calculated from MA score data)
+                        ma10: None,
+                        ma20: None,
+                        ma50: None,
+                        
+                        // Money flow metrics
+                        money_flow: mf_ticker.daily_data.get(&date).copied(),
+                        af: mf_ticker.activity_flow_data.get(&date).copied(),
+                        df: mf_ticker.dollar_flow_data.get(&date).copied(),
+                        ts: Some(mf_ticker.trend_score),
+                        
+                        // MA scores (will be populated from MA score data)
+                        score10: None,
+                        score20: None,
+                        score50: None,
+                    };
+                    
+                    enhanced_tickers.push(enhanced_ticker);
+                }
+            }
+        }
+        
+        if !enhanced_tickers.is_empty() {
+            enhanced_data_map.insert(date, enhanced_tickers);
+        }
+    }
+    
+    // Process MA score data and merge with existing enhanced data
+    for (date, ma_score_tickers) in ma_score_by_date {
+        // Get existing enhanced tickers for this date, or create new ones
+        let existing_tickers = enhanced_data_map.remove(&date).unwrap_or_default();
+        
+        let mut updated_tickers = Vec::new();
+        
+        // Create a map of existing tickers by OHLCV for quick lookup
+        let mut existing_map = std::collections::HashMap::new();
+        for ticker in existing_tickers {
+            let key = format!("{}:{}:{}:{}", ticker.open, ticker.high, ticker.low, ticker.close);
+            existing_map.insert(key, ticker);
+        }
+        
+        for ma_ticker in ma_score_tickers {
+            // Skip VNINDEX in enhanced calculations
+            if ma_ticker.ticker == "VNINDEX" {
+                continue;
+            }
+            
+            // Try to find corresponding ticker data for OHLCV values
+            if let Some(ticker_entry) = ticker_data.get(&ma_ticker.ticker) {
+                if let Some(ohlcv_point) = ticker_entry.data.iter().find(|p| p.time == date) {
+                    let key = format!("{}:{}:{}:{}", ohlcv_point.open, ohlcv_point.high, ohlcv_point.low, ohlcv_point.close);
+                    
+                    if let Some(mut existing_ticker) = existing_map.remove(&key) {
+                        // Update existing ticker with MA scores and moving averages
+                        existing_ticker.score10 = ma_ticker.ma10_scores.get(&date).copied();
+                        existing_ticker.score20 = ma_ticker.ma20_scores.get(&date).copied();
+                        existing_ticker.score50 = ma_ticker.ma50_scores.get(&date).copied();
+                        
+                        // Extract moving averages from debug data if available
+                        if let Some(debug_data) = &ma_ticker.debug_data {
+                            if let Some(debug) = debug_data.get(&date) {
+                                existing_ticker.ma10 = debug.ma10_value;
+                                existing_ticker.ma20 = debug.ma20_value;
+                                existing_ticker.ma50 = debug.ma50_value;
+                            }
+                        }
+                        
+                        updated_tickers.push(existing_ticker);
+                    } else {
+                        // Create new enhanced ticker
+                        let enhanced_ticker = crate::data_structures::EnhancedTickerData {
+                            date: date.clone(),
+                            open: ohlcv_point.open,
+                            high: ohlcv_point.high,
+                            low: ohlcv_point.low,
+                            close: ohlcv_point.close,
+                            volume: ohlcv_point.volume,
+                            
+                            // Moving averages from debug data
+                            ma10: ma_ticker.debug_data
+                                .as_ref()
+                                .and_then(|debug| debug.get(&date))
+                                .and_then(|debug| debug.ma10_value),
+                            ma20: ma_ticker.debug_data
+                                .as_ref()
+                                .and_then(|debug| debug.get(&date))
+                                .and_then(|debug| debug.ma20_value),
+                            ma50: ma_ticker.debug_data
+                                .as_ref()
+                                .and_then(|debug| debug.get(&date))
+                                .and_then(|debug| debug.ma50_value),
+                            
+                            // Money flow metrics (not available from MA score data alone)
+                            money_flow: None,
+                            af: None,
+                            df: None,
+                            ts: Some(ma_ticker.trend_score),
+                            
+                            // MA scores
+                            score10: ma_ticker.ma10_scores.get(&date).copied(),
+                            score20: ma_ticker.ma20_scores.get(&date).copied(),
+                            score50: ma_ticker.ma50_scores.get(&date).copied(),
+                        };
+                        
+                        updated_tickers.push(enhanced_ticker);
+                    }
+                }
+            }
+        }
+        
+        // Add back any remaining existing tickers that weren't updated
+        updated_tickers.extend(existing_map.into_values());
+        
+        if !updated_tickers.is_empty() {
+            enhanced_data_map.insert(date, updated_tickers);
+        }
+    }
+    
+    // Store the count before moving the map
+    let enhanced_data_count = enhanced_data_map.len();
+    let total_data_points = enhanced_data_map.values().map(|v| v.len()).sum::<usize>();
+    
+    // Update shared enhanced data
+    tracing::info!("About to acquire lock for storing enhanced data");
+    {
+        let mut data_guard = enhanced_data.lock().await;
+        tracing::info!(
+            "Lock acquired, storing enhanced data for {} dates, {} total data points",
+            enhanced_data_count,
+            total_data_points
+        );
+        *data_guard = enhanced_data_map;
+        let stored_count = data_guard.len();
+        tracing::info!("Enhanced data stored successfully, {} dates now available in shared state", stored_count);
+    }
+    tracing::info!("Lock released, enhanced data storage complete");
+    
+    Ok(enhanced_data_count)
 }
 
 async fn update_enhanced_data(
