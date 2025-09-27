@@ -5,7 +5,7 @@ Comprehensive test suite for the aipriceaction-proxy API.
 ## Usage
 
 ```bash
-# Basic usage
+# Basic usage (runs startup test sequence by default)
 python3 test_api_comprehensive.py http://localhost:9000
 
 # With custom timeout
@@ -13,6 +13,9 @@ python3 test_api_comprehensive.py http://localhost:9000 --timeout 30
 
 # Test production API
 python3 test_api_comprehensive.py https://api.aipriceaction.com
+
+# Single run only (skip 30s wait)
+python3 test_api_comprehensive.py http://localhost:9000 --single-run
 
 # Show help
 python3 test_api_comprehensive.py --help
