@@ -90,12 +90,15 @@ async fn main() {
     tracing::info!("Starting aipriceaction-proxy");
     tracing::info!(?app_config.environment, port = app_config.port, rayon_threads = num_threads, "Loaded configuration");
     
+    // Load ticker groups after tracing is initialized
+    let shared_ticker_groups: SharedTickerGroups = config::load_ticker_groups();
+    
     let shared_data: SharedData = Arc::new(Mutex::new(InMemoryData::new()));
-    let shared_enhanced_data: SharedEnhancedData = Arc::new(Mutex::new(EnhancedInMemoryData::new()));
+    let shared_enhanced_data: SharedEnhancedData = Arc::new(Mutex::new(EnhancedInMemoryData::default()));
     let shared_reputation: SharedReputation = Arc::new(Mutex::new(PublicActorReputation::new()));
     let last_internal_update: LastInternalUpdate = Arc::new(Mutex::new(Instant::now()));
     let shared_tokens: SharedTokenConfig = app_config.tokens.clone();
-    let shared_ticker_groups: SharedTickerGroups = config::load_ticker_groups();
+    // Note: shared_ticker_groups will be loaded after tracing is initialized
     
     // Initialize health stats with app config
     let health_stats = HealthStats {
@@ -123,13 +126,15 @@ async fn main() {
         health_stats: shared_health_stats.clone(),
     };
 
-    tracing::info!("Spawning background worker");
-    tokio::spawn(worker::run(
+    tracing::info!("About to spawn background worker");
+    let worker_handle = tokio::spawn(worker::run(
         shared_data.clone(),
         shared_enhanced_data.clone(),
         app_config.clone(),
         shared_health_stats.clone(),
     ));
+    
+    tracing::info!("Worker spawned successfully, continuing to HTTP server setup");
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default().per_second(10).burst_size(20).finish().unwrap(),
@@ -162,8 +167,9 @@ async fn main() {
         .with_state(app_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], app_config.port));
-    tracing::info!(%addr, "Server listening");
+    tracing::info!(%addr, "About to bind server");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    tracing::info!(%addr, "Server bound, starting to serve");
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
