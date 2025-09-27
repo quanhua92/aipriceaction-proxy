@@ -13,13 +13,13 @@ use crate::{
     utils::Logger,
 };
 use std::{
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex};
 
 /// Core state machine for managing stock data fetching and processing
 pub struct ClientDataStateMachine {
-    current_state: Box<dyn State + Send + Sync>,
+    current_state: Arc<Mutex<Box<dyn State + Send + Sync>>>,
     context: Arc<RwLock<StateContext>>,
     transition_history: Arc<Mutex<Vec<StateTransitionLog>>>,
     is_running: Arc<Mutex<bool>>,
@@ -41,7 +41,7 @@ impl ClientDataStateMachine {
         let initial_state = Box::new(crate::states::FetchCSVState::new());
 
         Self {
-            current_state: initial_state,
+            current_state: Arc::new(Mutex::new(initial_state)),
             context: Arc::new(RwLock::new(context)),
             transition_history: Arc::new(Mutex::new(Vec::new())),
             is_running: Arc::new(Mutex::new(false)),
@@ -53,7 +53,7 @@ impl ClientDataStateMachine {
     /// Start the state machine with 5-second tick interval
     pub async fn start(&mut self) -> anyhow::Result<()> {
         {
-            let mut running = self.is_running.lock().unwrap();
+            let mut running = self.is_running.lock().await;
             if *running {
                 self.logger.warn("State machine already running");
                 return Ok(());
@@ -68,7 +68,8 @@ impl ClientDataStateMachine {
         let enter_start = std::time::Instant::now();
         {
             let mut context = self.context.write().await;
-            self.current_state.enter(&mut context).await?;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.enter(&mut context).await?;
         }
         let enter_duration = enter_start.elapsed();
         self.logger.info(&format!("Initial state entry completed in {:.1}ms", enter_duration.as_secs_f64() * 1000.0));
@@ -77,7 +78,7 @@ impl ClientDataStateMachine {
         loop {
             // Check if we should continue running
             {
-                let running = self.is_running.lock().unwrap();
+                let running = self.is_running.lock().await;
                 if !*running {
                     break;
                 }
@@ -87,10 +88,10 @@ impl ClientDataStateMachine {
             let tick_start = std::time::Instant::now();
             match self.tick().await {
                 Ok(()) => {
-                    let current_state_name = self.current_state.name();
+                    let current_state_name = self.current_state_name().await;
                     if current_state_name == "READY" {
                         // First time reaching READY state - log initial completion
-                        let tick_count = *self.tick_count.lock().unwrap();
+                        let tick_count = *self.tick_count.lock().await;
                         if tick_count <= 5 {  // Only show this message once
                             let total_duration = start_time.elapsed();
                             let ready_time = chrono::Utc::now();
@@ -106,7 +107,7 @@ impl ClientDataStateMachine {
                             ));
 
                             // Show performance breakdown
-                            let stats = self.get_stats();
+                            let stats = self.get_stats().await;
                             self.logger.info(&format!(
                                 "[{}] 📊 READY STATE: {} ticks processed, {} state transitions",
                                 ready_time.format("%Y-%m-%d %H:%M:%S UTC"),
@@ -146,7 +147,7 @@ impl ClientDataStateMachine {
     /// Stop the state machine
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         {
-            let mut running = self.is_running.lock().unwrap();
+            let mut running = self.is_running.lock().await;
             if !*running {
                 return Ok(());
             }
@@ -158,7 +159,8 @@ impl ClientDataStateMachine {
         // Exit current state
         {
             let mut context = self.context.write().await;
-            self.current_state.exit(&mut context).await?;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.exit(&mut context).await?;
         }
 
         Ok(())
@@ -167,38 +169,40 @@ impl ClientDataStateMachine {
     /// Execute a single tick
     async fn tick(&mut self) -> anyhow::Result<()> {
         let tick_number = {
-            let mut count = self.tick_count.lock().unwrap();
+            let mut count = self.tick_count.lock().await;
             *count += 1;
             *count
         };
 
+        let current_state_name = self.current_state_name().await;
         self.logger
-            .debug(&format!("Tick #{} in {}", tick_number, self.current_state.name()));
+            .debug(&format!("Tick #{} in {}", tick_number, current_state_name));
 
         // Execute current state tick
         let now = chrono::Utc::now();
         self.logger.debug(&format!(
             "[{}] 🔄 [TICK] Starting tick for state: {}",
             now.format("%Y-%m-%d %H:%M:%S UTC"),
-            self.current_state.name()
+            current_state_name
         ));
 
         let next_state = {
             let mut context = self.context.write().await;
-            self.current_state.tick(&mut context).await?
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.tick(&mut context).await?
         };
 
         let tick_complete_time = chrono::Utc::now();
         self.logger.debug(&format!(
             "[{}] ✅ [TICK] Tick completed for state: {} - next_state: {}",
             tick_complete_time.format("%Y-%m-%d %H:%M:%S UTC"),
-            self.current_state.name(),
+            current_state_name,
             if next_state.is_some() { "Some(transition)" } else { "None" }
         ));
 
         // Check if we need to transition
         if let Some(new_state) = next_state {
-            let from_name = self.current_state.name().to_string();
+            let from_name = current_state_name;
             let _to_name = new_state.name().to_string();
             let reason = format!("State tick requested transition from {}", from_name);
 
@@ -214,14 +218,14 @@ impl ClientDataStateMachine {
         new_state: Box<dyn State + Send + Sync>,
         reason: String,
     ) -> anyhow::Result<()> {
-        let from_name = self.current_state.name().to_string();
+        let from_name = self.current_state_name().await;
         let to_name = new_state.name().to_string();
 
         log_state_transition(&from_name, &to_name, &reason);
 
         // Record transition in history
         {
-            let mut history = self.transition_history.lock().unwrap();
+            let mut history = self.transition_history.lock().await;
             history.push(StateTransitionLog::new(from_name.clone(), to_name.clone(), reason));
 
             // Keep history manageable (last 100 transitions)
@@ -233,16 +237,21 @@ impl ClientDataStateMachine {
         // Exit current state
         {
             let mut context = self.context.write().await;
-            self.current_state.exit(&mut context).await?;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.exit(&mut context).await?;
         }
 
         // Switch to new state
-        self.current_state = new_state;
+        {
+            let mut state_guard = self.current_state.lock().await;
+            *state_guard = new_state;
+        }
 
         // Enter new state
         {
             let mut context = self.context.write().await;
-            self.current_state.enter(&mut context).await?;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.enter(&mut context).await?;
         }
 
         self.logger.info(&format!(
@@ -258,7 +267,8 @@ impl ClientDataStateMachine {
 
         let immediate_next_state = {
             let mut context = self.context.write().await;
-            self.current_state.tick(&mut context).await?
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.tick(&mut context).await?
         };
 
         // Handle immediate transitions
@@ -277,52 +287,60 @@ impl ClientDataStateMachine {
     }
 
     /// Get current state name
-    pub fn current_state_name(&self) -> String {
-        self.current_state.name().to_string()
+    pub async fn current_state_name(&self) -> String {
+        let state_guard = self.current_state.lock().await;
+        state_guard.name().to_string()
     }
 
     /// Get transition history
-    pub fn get_transition_history(&self) -> Vec<StateTransitionLog> {
-        self.transition_history.lock().unwrap().clone()
+    pub async fn get_transition_history(&self) -> Vec<StateTransitionLog> {
+        self.transition_history.lock().await.clone()
     }
 
     /// Check if machine is running
-    pub fn is_running(&self) -> bool {
-        *self.is_running.lock().unwrap()
+    pub async fn is_running(&self) -> bool {
+        *self.is_running.lock().await
     }
 
     /// Check if system is ready to handle requests
-    pub fn is_ready(&self) -> bool {
-        self.is_running() && self.current_state.name() == "READY"
+    pub async fn is_ready(&self) -> bool {
+        self.is_running().await && {
+            let state_guard = self.current_state.lock().await;
+            state_guard.name() == "READY"
+        }
     }
 
     /// Check if system is currently fetching data
-    pub fn is_fetching(&self) -> bool {
-        matches!(self.current_state.name(), "FETCH_CSV" | "FETCH_LIVE")
+    pub async fn is_fetching(&self) -> bool {
+        let state_guard = self.current_state.lock().await;
+        let state_name = state_guard.name();
+        matches!(state_name, "FETCH_CSV" | "FETCH_LIVE")
     }
 
     /// Check if system is calculating
-    pub fn is_calculating(&self) -> bool {
-        matches!(self.current_state.name(), "MONEY_FLOW" | "MA_SCORE")
+    pub async fn is_calculating(&self) -> bool {
+        let state_guard = self.current_state.lock().await;
+        let state_name = state_guard.name();
+        matches!(state_name, "MONEY_FLOW" | "MA_SCORE")
     }
 
     /// Get statistics
-    pub fn get_stats(&self) -> StateMachineStats {
-        let tick_count = *self.tick_count.lock().unwrap();
-        let transition_count = self.transition_history.lock().unwrap().len();
+    pub async fn get_stats(&self) -> StateMachineStats {
+        let tick_count = *self.tick_count.lock().await;
+        let transition_count = self.transition_history.lock().await.len();
 
         StateMachineStats {
-            current_state: self.current_state_name(),
-            is_running: self.is_running(),
+            current_state: self.current_state_name().await,
+            is_running: self.is_running().await,
             tick_count,
             transition_count,
-            uptime_seconds: self.calculate_uptime(),
+            uptime_seconds: self.calculate_uptime().await,
         }
     }
 
     /// Calculate uptime in seconds
-    fn calculate_uptime(&self) -> u64 {
-        let history = self.transition_history.lock().unwrap();
+    async fn calculate_uptime(&self) -> u64 {
+        let history = self.transition_history.lock().await;
         if history.is_empty() {
             return 0;
         }
@@ -355,6 +373,190 @@ impl ClientDataStateMachine {
     /// Get context for external access (read-only)
     pub fn get_context(&self) -> Arc<RwLock<StateContext>> {
         Arc::clone(&self.context)
+    }
+
+    /// Check if money flow data is available
+    pub fn has_money_flow_data(&self) -> bool {
+        let context = self.context.blocking_read();
+        context.cache.get_money_flow_date_count() > 0
+    }
+
+    /// Check if MA score data is available
+    pub fn has_ma_score_data(&self) -> bool {
+        let context = self.context.blocking_read();
+        context.cache.get_ma_score_date_count() > 0
+    }
+
+    /// Check if ticker data is available
+    pub fn has_ticker_data(&self) -> bool {
+        let context = self.context.blocking_read();
+        context.cache.get_ticker_count() > 0
+    }
+
+    /// Get money flow data from state machine
+    pub async fn get_money_flow_data(&self) -> Option<Vec<crate::utils::money_flow_utils::MoneyFlowTickerData>> {
+        let context = self.context.read().await;
+        context.cache.get_money_flow_data(None)
+    }
+
+    /// Get MA score data from state machine
+    pub async fn get_ma_score_data(&self) -> Option<Vec<crate::models::ma_score::MAScoreTickerData>> {
+        let context = self.context.read().await;
+        context.cache.get_ma_score_data(None, None)
+    }
+
+    /// Get ticker data from state machine
+    pub async fn get_ticker_data(&self) -> std::collections::HashMap<String, crate::models::TickerCacheEntry> {
+        let context = self.context.read().await;
+        context.cache.get_cache().ticker_data.clone()
+    }
+
+    /// Start the state machine from a shared reference (works with Arc<Mutex<T>>)
+    pub async fn start_shared(&self) -> anyhow::Result<()> {
+        {
+            let mut running = self.is_running.lock().await;
+            if *running {
+                self.logger.warn("State machine already running");
+                return Ok(());
+            }
+            *running = true;
+        }
+
+        let start_time = std::time::Instant::now();
+        self.logger.info("Starting state machine with shared reference");
+
+        // Enter initial state
+        let enter_start = std::time::Instant::now();
+        {
+            let mut context = self.context.write().await;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.enter(&mut context).await?;
+        }
+        let enter_duration = enter_start.elapsed();
+        self.logger.info(&format!("Initial state entry completed in {:.1}ms", enter_duration.as_secs_f64() * 1000.0));
+
+        self.logger.info("State machine started successfully (shared mode)");
+        Ok(())
+    }
+
+    /// Execute a single tick from shared reference
+    pub async fn tick_shared(&self) -> anyhow::Result<()> {
+        let tick_number = {
+            let mut count = self.tick_count.lock().await;
+            *count += 1;
+            *count
+        };
+
+        let current_state_name = self.current_state_name().await;
+        self.logger
+            .debug(&format!("Shared tick #{} in {}", tick_number, current_state_name));
+
+        // Execute current state tick
+        let now = chrono::Utc::now();
+        self.logger.debug(&format!(
+            "[{}] 🔄 [SHARED TICK] Starting tick for state: {}",
+            now.format("%Y-%m-%d %H:%M:%S UTC"),
+            current_state_name
+        ));
+
+        let next_state = {
+            let mut context = self.context.write().await;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.tick(&mut context).await?
+        };
+
+        let tick_complete_time = chrono::Utc::now();
+        self.logger.debug(&format!(
+            "[{}] ✅ [SHARED TICK] Tick completed for state: {} - next_state: {}",
+            tick_complete_time.format("%Y-%m-%d %H:%M:%S UTC"),
+            current_state_name,
+            if next_state.is_some() { "Some(transition)" } else { "None" }
+        ));
+
+        // Check if we need to transition
+        if let Some(new_state) = next_state {
+            let from_name = current_state_name;
+            let to_name = new_state.name().to_string();
+            let reason = format!("State tick requested transition from {}", from_name);
+
+            self.transition_to_shared(new_state, reason).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Transition to a new state from shared reference
+    async fn transition_to_shared(
+        &self,
+        new_state: Box<dyn State + Send + Sync>,
+        reason: String,
+    ) -> anyhow::Result<()> {
+        let from_name = self.current_state_name().await;
+        let to_name = new_state.name().to_string();
+
+        log_state_transition(&from_name, &to_name, &reason);
+
+        // Record transition in history
+        {
+            let mut history = self.transition_history.lock().await;
+            history.push(StateTransitionLog::new(from_name.clone(), to_name.clone(), reason));
+
+            // Keep history manageable (last 100 transitions)
+            if history.len() > 100 {
+                history.remove(0);
+            }
+        }
+
+        // Exit current state
+        {
+            let mut context = self.context.write().await;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.exit(&mut context).await?;
+        }
+
+        // Switch to new state
+        {
+            let mut state_guard = self.current_state.lock().await;
+            *state_guard = new_state;
+        }
+
+        // Enter new state
+        {
+            let mut context = self.context.write().await;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.enter(&mut context).await?;
+        }
+
+        self.logger.info(&format!(
+            "State transition completed: {} → {}",
+            from_name, to_name
+        ));
+
+        // Immediately tick the new state
+        self.logger.debug(&format!(
+            "Immediately ticking new state {} after transition",
+            to_name
+        ));
+
+        let immediate_next_state = {
+            let mut context = self.context.write().await;
+            let mut state_guard = self.current_state.lock().await;
+            state_guard.tick(&mut context).await?
+        };
+
+        // Handle immediate transitions
+        if let Some(next_state) = immediate_next_state {
+            let next_name = next_state.name().to_string();
+            self.logger.info(&format!(
+                "Immediate transition requested: {} → {}",
+                to_name, next_name
+            ));
+
+            let immediate_reason = format!("Immediate transition from {}", to_name);
+            Box::pin(self.transition_to_shared(next_state, immediate_reason)).await?;
+        }
+
+        Ok(())
     }
 }
 

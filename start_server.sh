@@ -83,22 +83,46 @@ export PORT="$PORT"
 export RUST_LOG="$RUST_LOG"
 
 # Start the server in background
-cargo run &
+# Create log file with timestamp
+LOG_FILE="server-$(date +%Y%m%d_%H%M%S).log"
+
+# Start server in background with logging
+nohup cargo run > "$LOG_FILE" 2>&1 &
 
 # Store the PID
 PID=$!
 echo "Server started with PID: $PID"
 echo "Server running at http://localhost:$PORT"
+echo "Log file: $LOG_FILE"
 echo ""
 echo "To stop the server, run: kill $PID"
-echo "To view logs, run: tail -f [log file]"
+echo "To view logs, run: tail -f $LOG_FILE"
 echo ""
 
 # Wait a moment and check if server started successfully
-sleep 2
+sleep 5
 if ps -p $PID > /dev/null; then
     echo "Server is running successfully!"
+    echo "Waiting 30 seconds for CLI state machine initialization..."
+    echo ""
+    
+    # Wait for CLI state machine to initialize
+    sleep 30
+    
+    # Show recent logs
+    echo "=== Recent Server Logs ==="
+    tail -20 "$LOG_FILE"
+    echo ""
+    
+    # Test server health
+    echo "=== Testing Server Health ==="
+    curl -s "http://localhost:$PORT/health" | jq . || echo "Server health check failed"
+    
 else
     echo "Server failed to start. Check the logs for errors."
+    if [ -f "$LOG_FILE" ]; then
+        echo "=== Error Logs ==="
+        cat "$LOG_FILE"
+    fi
     exit 1
 fi
