@@ -13,6 +13,7 @@ use tracing::{info, debug, warn, error};
 
 
 pub async fn run(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
+    println!("🚀 WORKER FUNCTION CALLED - DEBUG");
     info!("🚀 Worker function started");
     info!("🔍 DEBUG: About to check core_url");
     if let Some(core_url) = &config.core_network_url {
@@ -442,172 +443,158 @@ async fn update_enhanced_data_from_state_machine(
     // Convert CLI data structures to enhanced data structures
     let mut enhanced_data_map = std::collections::HashMap::new();
     
-    // Group money flow data by date
-    let mut money_flow_by_date = std::collections::HashMap::new();
+    // Group money flow data by symbol
+    let mut money_flow_by_symbol = std::collections::HashMap::new();
     for mf_ticker in money_flow_data {
-        for (date, money_flow_value) in &mf_ticker.daily_data {
-            money_flow_by_date
-                .entry(date.clone())
-                .or_insert_with(Vec::new)
-                .push(mf_ticker.clone());
-        }
+        money_flow_by_symbol
+            .entry(mf_ticker.ticker.clone())
+            .or_insert_with(Vec::new)
+            .push(mf_ticker);
     }
     
-    // Group MA score data by date
-    let mut ma_score_by_date = std::collections::HashMap::new();
+    // Group MA score data by symbol
+    let mut ma_score_by_symbol = std::collections::HashMap::new();
     for ma_ticker in ma_score_data {
-        // Collect all dates from MA score data
-        let all_dates: Vec<String> = ma_ticker.ma10_scores.keys()
-            .chain(ma_ticker.ma20_scores.keys())
-            .chain(ma_ticker.ma50_scores.keys())
-            .cloned()
-            .collect();
-        
-        for date in all_dates {
-            ma_score_by_date
-                .entry(date.clone())
-                .or_insert_with(Vec::new)
-                .push(ma_ticker.clone());
-        }
+        ma_score_by_symbol
+            .entry(ma_ticker.ticker.clone())
+            .or_insert_with(Vec::new)
+            .push(ma_ticker);
     }
     
-    // Process money flow data
-    for (date, money_flow_tickers) in money_flow_by_date {
+    // Process each symbol that has either money flow or MA score data
+    let all_symbols: std::collections::HashSet<String> = money_flow_by_symbol.keys()
+        .chain(ma_score_by_symbol.keys())
+        .cloned()
+        .collect();
+    
+    for symbol in all_symbols {
+        // Skip VNINDEX in enhanced calculations
+        if symbol == "VNINDEX" {
+            continue;
+        }
+        
         let mut enhanced_tickers = Vec::new();
         
-        for mf_ticker in money_flow_tickers {
-            // Skip VNINDEX in enhanced calculations
-            if mf_ticker.ticker == "VNINDEX" {
-                continue;
-            }
-            
-            // Get corresponding ticker data for OHLCV values
-            if let Some(ticker_entry) = ticker_data.get(&mf_ticker.ticker) {
-                // Find the data point for this specific date
-                if let Some(ohlcv_point) = ticker_entry.data.iter().find(|p| p.time == date) {
-                    let enhanced_ticker = crate::data_structures::EnhancedTickerData {
-                        date: date.clone(),
-                        open: ohlcv_point.open,
-                        high: ohlcv_point.high,
-                        low: ohlcv_point.low,
-                        close: ohlcv_point.close,
-                        volume: ohlcv_point.volume,
-                        
-                        // Moving averages (will be calculated from MA score data)
-                        ma10: None,
-                        ma20: None,
-                        ma50: None,
-                        
-                        // Money flow metrics
-                        money_flow: mf_ticker.daily_data.get(&date).copied(),
-                        af: mf_ticker.activity_flow_data.get(&date).copied(),
-                        df: mf_ticker.dollar_flow_data.get(&date).copied(),
-                        ts: Some(mf_ticker.trend_score),
-                        
-                        // MA scores (will be populated from MA score data)
-                        score10: None,
-                        score20: None,
-                        score50: None,
-                    };
-                    
-                    enhanced_tickers.push(enhanced_ticker);
-                }
-            }
-        }
-        
-        if !enhanced_tickers.is_empty() {
-            enhanced_data_map.insert(date, enhanced_tickers);
-        }
-    }
-    
-    // Process MA score data and merge with existing enhanced data
-    for (date, ma_score_tickers) in ma_score_by_date {
-        // Get existing enhanced tickers for this date, or create new ones
-        let existing_tickers = enhanced_data_map.remove(&date).unwrap_or_default();
-        
-        let mut updated_tickers = Vec::new();
-        
-        // Create a map of existing tickers by OHLCV for quick lookup
-        let mut existing_map = std::collections::HashMap::new();
-        for ticker in existing_tickers {
-            let key = format!("{}:{}:{}:{}", ticker.open, ticker.high, ticker.low, ticker.close);
-            existing_map.insert(key, ticker);
-        }
-        
-        for ma_ticker in ma_score_tickers {
-            // Skip VNINDEX in enhanced calculations
-            if ma_ticker.ticker == "VNINDEX" {
-                continue;
-            }
-            
-            // Try to find corresponding ticker data for OHLCV values
-            if let Some(ticker_entry) = ticker_data.get(&ma_ticker.ticker) {
-                if let Some(ohlcv_point) = ticker_entry.data.iter().find(|p| p.time == date) {
-                    let key = format!("{}:{}:{}:{}", ohlcv_point.open, ohlcv_point.high, ohlcv_point.low, ohlcv_point.close);
-                    
-                    if let Some(mut existing_ticker) = existing_map.remove(&key) {
-                        // Update existing ticker with MA scores and moving averages
-                        existing_ticker.score10 = ma_ticker.ma10_scores.get(&date).copied();
-                        existing_ticker.score20 = ma_ticker.ma20_scores.get(&date).copied();
-                        existing_ticker.score50 = ma_ticker.ma50_scores.get(&date).copied();
-                        
-                        // Extract moving averages from debug data if available
-                        if let Some(debug_data) = &ma_ticker.debug_data {
-                            if let Some(debug) = debug_data.get(&date) {
-                                existing_ticker.ma10 = debug.ma10_value;
-                                existing_ticker.ma20 = debug.ma20_value;
-                                existing_ticker.ma50 = debug.ma50_value;
-                            }
+        // Get money flow data for this symbol
+        if let Some(mf_tickers) = money_flow_by_symbol.get(&symbol) {
+            for mf_ticker in mf_tickers {
+                // Get corresponding ticker data for OHLCV values
+                if let Some(ticker_entry) = ticker_data.get(&symbol) {
+                    for (date, money_flow_value) in &mf_ticker.daily_data {
+                        if let Some(ohlcv_point) = ticker_entry.data.iter().find(|p| p.time == *date) {
+                            let enhanced_ticker = crate::data_structures::EnhancedTickerData {
+                                date: date.clone(),
+                                open: ohlcv_point.open,
+                                high: ohlcv_point.high,
+                                low: ohlcv_point.low,
+                                close: ohlcv_point.close,
+                                volume: ohlcv_point.volume,
+                                
+                                // Moving averages (will be calculated from MA score data)
+                                ma10: None,
+                                ma20: None,
+                                ma50: None,
+                                
+                                // Money flow metrics
+                                money_flow: Some(*money_flow_value),
+                                af: mf_ticker.activity_flow_data.get(date).copied(),
+                                df: mf_ticker.dollar_flow_data.get(date).copied(),
+                                ts: Some(mf_ticker.trend_score),
+                                
+                                // MA scores (will be populated from MA score data)
+                                score10: None,
+                                score20: None,
+                                score50: None,
+                            };
+                            
+                            enhanced_tickers.push(enhanced_ticker);
                         }
-                        
-                        updated_tickers.push(existing_ticker);
-                    } else {
-                        // Create new enhanced ticker
-                        let enhanced_ticker = crate::data_structures::EnhancedTickerData {
-                            date: date.clone(),
-                            open: ohlcv_point.open,
-                            high: ohlcv_point.high,
-                            low: ohlcv_point.low,
-                            close: ohlcv_point.close,
-                            volume: ohlcv_point.volume,
-                            
-                            // Moving averages from debug data
-                            ma10: ma_ticker.debug_data
-                                .as_ref()
-                                .and_then(|debug| debug.get(&date))
-                                .and_then(|debug| debug.ma10_value),
-                            ma20: ma_ticker.debug_data
-                                .as_ref()
-                                .and_then(|debug| debug.get(&date))
-                                .and_then(|debug| debug.ma20_value),
-                            ma50: ma_ticker.debug_data
-                                .as_ref()
-                                .and_then(|debug| debug.get(&date))
-                                .and_then(|debug| debug.ma50_value),
-                            
-                            // Money flow metrics (not available from MA score data alone)
-                            money_flow: None,
-                            af: None,
-                            df: None,
-                            ts: Some(ma_ticker.trend_score),
-                            
-                            // MA scores
-                            score10: ma_ticker.ma10_scores.get(&date).copied(),
-                            score20: ma_ticker.ma20_scores.get(&date).copied(),
-                            score50: ma_ticker.ma50_scores.get(&date).copied(),
-                        };
-                        
-                        updated_tickers.push(enhanced_ticker);
                     }
                 }
             }
         }
         
-        // Add back any remaining existing tickers that weren't updated
-        updated_tickers.extend(existing_map.into_values());
+        // Get MA score data for this symbol and merge with existing data
+        if let Some(ma_tickers) = ma_score_by_symbol.get(&symbol) {
+            for ma_ticker in ma_tickers {
+                // Get corresponding ticker data for OHLCV values
+                if let Some(ticker_entry) = ticker_data.get(&symbol) {
+                    // Collect all dates from MA score data
+                    let all_dates: std::collections::HashSet<String> = ma_ticker.ma10_scores.keys()
+                        .chain(ma_ticker.ma20_scores.keys())
+                        .chain(ma_ticker.ma50_scores.keys())
+                        .cloned()
+                        .collect();
+                    
+                    for date in all_dates {
+                        if let Some(ohlcv_point) = ticker_entry.data.iter().find(|p| p.time == date) {
+                            // Check if we already have an enhanced ticker for this date
+                            let existing_ticker = enhanced_tickers.iter_mut()
+                                .find(|t| t.date == date);
+                            
+                            if let Some(ticker) = existing_ticker {
+                                // Update existing ticker with MA scores and moving averages
+                                ticker.score10 = ma_ticker.ma10_scores.get(&date).copied();
+                                ticker.score20 = ma_ticker.ma20_scores.get(&date).copied();
+                                ticker.score50 = ma_ticker.ma50_scores.get(&date).copied();
+                                
+                                // Extract moving averages from debug data if available
+                                if let Some(debug_data) = &ma_ticker.debug_data {
+                                    if let Some(debug) = debug_data.get(&date) {
+                                        ticker.ma10 = debug.ma10_value;
+                                        ticker.ma20 = debug.ma20_value;
+                                        ticker.ma50 = debug.ma50_value;
+                                    }
+                                }
+                            } else {
+                                // Create new enhanced ticker
+                                let enhanced_ticker = crate::data_structures::EnhancedTickerData {
+                                    date: date.clone(),
+                                    open: ohlcv_point.open,
+                                    high: ohlcv_point.high,
+                                    low: ohlcv_point.low,
+                                    close: ohlcv_point.close,
+                                    volume: ohlcv_point.volume,
+                                    
+                                    // Moving averages from debug data
+                                    ma10: ma_ticker.debug_data
+                                        .as_ref()
+                                        .and_then(|debug| debug.get(&date))
+                                        .and_then(|debug| debug.ma10_value),
+                                    ma20: ma_ticker.debug_data
+                                        .as_ref()
+                                        .and_then(|debug| debug.get(&date))
+                                        .and_then(|debug| debug.ma20_value),
+                                    ma50: ma_ticker.debug_data
+                                        .as_ref()
+                                        .and_then(|debug| debug.get(&date))
+                                        .and_then(|debug| debug.ma50_value),
+                                    
+                                    // Money flow metrics (not available from MA score data alone)
+                                    money_flow: None,
+                                    af: None,
+                                    df: None,
+                                    ts: Some(ma_ticker.trend_score),
+                                    
+                                    // MA scores
+                                    score10: ma_ticker.ma10_scores.get(&date).copied(),
+                                    score20: ma_ticker.ma20_scores.get(&date).copied(),
+                                    score50: ma_ticker.ma50_scores.get(&date).copied(),
+                                };
+                                
+                                enhanced_tickers.push(enhanced_ticker);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         
-        if !updated_tickers.is_empty() {
-            enhanced_data_map.insert(date, updated_tickers);
+        // Sort enhanced tickers by date
+        enhanced_tickers.sort_by(|a, b| a.date.cmp(&b.date));
+        
+        if !enhanced_tickers.is_empty() {
+            enhanced_data_map.insert(symbol, enhanced_tickers);
         }
     }
     
