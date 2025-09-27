@@ -643,12 +643,13 @@ async fn update_shared_cli_cache_from_state_machine(
     tracing::info!("🔍 DEBUG: Starting cache sync process");
     
     // Check if state machine is ready and extract real data
-    let is_ready = {
+    let (is_ready, current_state) = {
         let guard = state_machine.lock().await;
         let ready = guard.is_ready().await;
+        let state = guard.current_state_name().await;
         tracing::info!("🔍 State machine ready check: {}", ready);
-        tracing::info!("🔍 State machine current state: {}", guard.current_state_name().await);
-        ready
+        tracing::info!("🔍 State machine current state: {}", state);
+        (ready, state)
     };
     
     if !is_ready {
@@ -659,12 +660,38 @@ async fn update_shared_cli_cache_from_state_machine(
     // Extract real data from state machine
     tracing::info!("🔧 DEBUG: Extracting real data from state machine");
     
-    // For now, use placeholder values until we verify the method signatures
-    let has_money_flow = false;
-    let has_ma_scores = false;
-    let has_ticker_data = false;
+    // Extract real data from state machine using shared methods
+    tracing::info!("🔧 DEBUG: Extracting real data from state machine using shared methods");
     
-    tracing::info!("🔧 DEBUG: Using placeholder data flags - money_flow: {}, ma_scores: {}, ticker_data: {}", 
+    // Extract real data using shared methods that work with Arc<Mutex<T>>
+    let (money_flow_data, ma_score_data, ticker_data) = {
+        let guard = state_machine.lock().await;
+        
+        // Call the shared methods that work with Arc<Mutex<T>>
+        let money_flow_data = guard.get_money_flow_data_shared().await;
+        let ma_score_data = guard.get_ma_score_data_shared().await;
+        let ticker_data = guard.get_ticker_data_shared().await;
+        
+        tracing::info!("🔧 REAL DATA: money_flow: {} entries, ma_scores: {} entries, ticker_data: {} symbols", 
+                      money_flow_data.as_ref().map_or(0, |d| d.len()),
+                      ma_score_data.as_ref().map_or(0, |d| d.len()),
+                      ticker_data.len());
+        
+        (money_flow_data, ma_score_data, ticker_data)
+    };
+    
+    let has_money_flow = money_flow_data.is_some();
+    let has_ma_scores = ma_score_data.is_some();
+    let has_ticker_data = !ticker_data.is_empty();
+    
+    tracing::info!("🔧 DEBUG: Real data availability - money_flow: {}, ma_scores: {}, ticker_data: {}", 
+                  has_money_flow, has_ma_scores, has_ticker_data);
+    
+    let has_money_flow = money_flow_data.is_some();
+    let has_ma_scores = ma_score_data.is_some();
+    let has_ticker_data = !ticker_data.is_empty();
+    
+    tracing::info!("🔧 DEBUG: Real data availability - money_flow: {}, ma_scores: {}, ticker_data: {}", 
                   has_money_flow, has_ma_scores, has_ticker_data);
     
     // Extract real data from state machine and update shared cache
@@ -678,12 +705,7 @@ async fn update_shared_cli_cache_from_state_machine(
         
         // Extract real money flow data
         if has_money_flow {
-            if let Some(money_flow_data) = {
-                let guard = state_machine.lock().await;
-                // Need to call the method correctly - it's on the state machine, not the guard
-                // For now, return None to avoid compilation error
-                None as Option<Vec<aipriceaction::utils::money_flow_utils::MoneyFlowTickerData>>
-            } {
+            if let Some(money_flow_data) = money_flow_data {
                 tracing::info!("🔧 REAL DATA: Extracted {} money flow entries", money_flow_data.len());
                 
                 // Convert to shared cache format
@@ -698,16 +720,13 @@ async fn update_shared_cli_cache_from_state_machine(
         
         // Extract real MA score data
         if has_ma_scores {
-            if let Some(ma_score_data) = {
-                let guard = state_machine.lock().await;
-                guard.get_ma_score_data().await
-            } {
+            if let Some(ma_score_data) = &ma_score_data {
                 tracing::info!("🔧 REAL DATA: Extracted {} MA score entries", ma_score_data.len());
                 
                 // Convert to shared cache format
                 shared_cache.ma_score_data.clear();
                 for ma_ticker in ma_score_data {
-                    shared_cache.ma_score_data.insert(ma_ticker.ticker.clone(), vec![ma_ticker]);
+                    shared_cache.ma_score_data.insert(ma_ticker.ticker.clone(), vec![ma_ticker.clone()]);
                 }
             } else {
                 tracing::warn!("⚠️ No MA score data available from state machine");
@@ -716,13 +735,8 @@ async fn update_shared_cli_cache_from_state_machine(
         
         // Extract real ticker data
         if has_ticker_data {
-            let ticker_data = {
-                let guard = state_machine.lock().await;
-                guard.get_ticker_data().await
-            };
-            
             tracing::info!("🔧 REAL DATA: Extracted {} ticker entries", ticker_data.len());
-            shared_cache.ticker_data = ticker_data;
+            shared_cache.ticker_data = ticker_data.clone();
         }
         
         // Update version and timestamp

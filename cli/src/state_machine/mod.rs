@@ -411,6 +411,24 @@ impl ClientDataStateMachine {
         context.cache.get_cache().ticker_data.clone()
     }
 
+    /// Get money flow data from shared reference (works with Arc<Mutex<T>>)
+    pub async fn get_money_flow_data_shared(&self) -> Option<Vec<crate::utils::money_flow_utils::MoneyFlowTickerData>> {
+        let context = self.context.read().await;
+        context.cache.get_money_flow_data(None)
+    }
+
+    /// Get MA score data from shared reference (works with Arc<Mutex<T>>)
+    pub async fn get_ma_score_data_shared(&self) -> Option<Vec<crate::models::ma_score::MAScoreTickerData>> {
+        let context = self.context.read().await;
+        context.cache.get_ma_score_data(None, None)
+    }
+
+    /// Get ticker data from shared reference (works with Arc<Mutex<T>>)
+    pub async fn get_ticker_data_shared(&self) -> std::collections::HashMap<String, crate::models::TickerCacheEntry> {
+        let context = self.context.read().await;
+        context.cache.get_cache().ticker_data.clone()
+    }
+
     /// Start the state machine from a shared reference (works with Arc<Mutex<T>>)
     pub async fn start_shared(&self) -> anyhow::Result<()> {
         {
