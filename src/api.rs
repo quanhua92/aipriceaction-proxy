@@ -81,11 +81,24 @@ pub async fn get_all_tickers_handler(
         let symbols: Vec<_> = filtered_data.keys().cloned().collect();
         let total_data_points: usize = filtered_data.values().map(|v| v.len()).sum();
 
-        info!(symbol_count, symbols = ?symbols, total_data_points, "Returning fallback OHLCV data");
+        info!(symbol_count, symbols = ?symbols, total_data_points, format, "Returning fallback OHLCV data");
 
-        let mut headers = HeaderMap::new();
-        headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
-        (StatusCode::OK, headers, Json(filtered_data)).into_response()
+        match format {
+            "csv" => {
+                // Return CSV format for OHLCV data
+                let csv_content = format_ohlcv_data_as_csv(filtered_data);
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", "text/csv".parse().unwrap());
+                headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+                (StatusCode::OK, headers, csv_content).into_response()
+            }
+            _ => {
+                // Return JSON format
+                let mut headers = HeaderMap::new();
+                headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+                (StatusCode::OK, headers, Json(filtered_data)).into_response()
+            }
+        }
     }
 }
 
@@ -410,6 +423,37 @@ fn format_enhanced_data_as_csv(data: crate::data_structures::EnhancedInMemoryDat
                 format_optional_f64(point.score10),
                 format_optional_f64(point.score20),
                 format_optional_f64(point.score50),
+            ).unwrap();
+        }
+    }
+
+    String::from_utf8(csv_content).unwrap()
+}
+
+fn format_ohlcv_data_as_csv(data: crate::data_structures::InMemoryData) -> String {
+    use std::io::Write;
+
+    let mut csv_content = Vec::new();
+
+    // Write header for OHLCV data (without enhanced calculations)
+    writeln!(
+        csv_content,
+        "date,symbol,open,high,low,close,volume"
+    ).unwrap();
+
+    // Write data rows
+    for (symbol, ohlcv_data) in data {
+        for ohlcv in ohlcv_data {
+            writeln!(
+                csv_content,
+                "{},{},{},{},{},{},{}",
+                ohlcv.time,
+                symbol,
+                ohlcv.open,
+                ohlcv.high,
+                ohlcv.low,
+                ohlcv.close,
+                ohlcv.volume,
             ).unwrap();
         }
     }
