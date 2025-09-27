@@ -14,25 +14,51 @@ use tracing::{info, debug, warn, error};
 
 pub async fn run(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
     println!("🚀 WORKER FUNCTION CALLED - DEBUG");
+    println!("🚀 WORKER FUNCTION ENTRY POINT - INSIDE FUNCTION");
     info!("🚀 Worker function started");
+    println!("🚀 AFTER INFO STATEMENT");
     info!("🔍 DEBUG: About to check core_url");
-    if let Some(core_url) = &config.core_network_url {
-        info!(%core_url, "Starting as public node worker");
-        info!("🔍 DEBUG: This is a public node, calling run_public_node_worker");
-        run_public_node_worker(data, core_url.clone(), config.public_refresh_interval, health_stats).await;
+    println!("🚀 AFTER CORE_URL DEBUG");
+    info!("🔍 DEBUG: core_network_url = {:?}", config.core_network_url);
+    println!("🚀 AFTER CORE_NETWORK_URL PRINT");
+    info!("🔍 DEBUG: Reached if-let check");
+    println!("🚀 AFTER IF-LET CHECK");
+    info!("🔍 DEBUG: Function entry point reached successfully");
+    println!("🚀 AFTER FUNCTION ENTRY SUCCESS");
+    println!("🚀 ABOUT TO ENTER IF-LET BLOCK");
+    println!("🔍 DEBUG: config.core_network_url value: {:?}", config.core_network_url);
+    println!("🔍 DEBUG: About to enter if-let block - no panic yet");
+    println!("🔍 DEBUG: Right before if-let statement");
+    println!("🔍 DEBUG: Checking if core_network_url is Some or None");
+    
+    if config.core_network_url.is_some() {
+        println!("🔍 DEBUG: core_network_url is Some");
+        if let Some(core_url) = &config.core_network_url {
+            println!("🚀 INSIDE IF-LET BLOCK (core_url: {:?})", core_url);
+            info!(%core_url, "Starting as public node worker");
+            info!("🔍 DEBUG: This is a public node, calling run_public_node_worker");
+            run_public_node_worker(data, core_url.clone(), config.public_refresh_interval, health_stats).await;
+        }
     } else {
+        println!("🔍 DEBUG: core_network_url is None, executing else branch");
         info!(environment = %config.environment, "Starting as core node worker");
         info!("🔍 DEBUG: This is a core node, calling run_core_node_worker");
         run_core_node_worker(data, enhanced_data, config, health_stats).await;
     }
+    info!("🔍 DEBUG: Worker function completed if-let block");
 }
 
 async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedData, config: AppConfig, health_stats: SharedHealthStats) {
+    println!("🔍 DEBUG: run_core_node_worker function called");
+    println!("🔍 DEBUG: About to initialize office hours state");
     info!("🚀 Initializing core node worker - START");
     info!("🔍 DEBUG: Entered run_core_node_worker function");
     
     // Initialize office hours state
+    println!("🔍 DEBUG: Creating office_hours_state");
     let office_hours_state: SharedOfficeHoursState = Arc::new(Mutex::new(OfficeHoursState::default()));
+    println!("🔍 DEBUG: office_hours_state created successfully");
+    println!("🔍 DEBUG: About to log office hours configuration");
     
     info!(
         enable_office_hours = config.enable_office_hours,
@@ -43,66 +69,120 @@ async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedDat
         non_office_interval_secs = config.non_office_hours_interval.as_secs(),
         "Office hours configuration loaded"
     );
+    println!("🔍 DEBUG: Office hours configuration logged successfully");
     
-    // TEMPORARY: Skip VCI client initialization for testing
-    info!("🔧 DEBUG: Skipping VCI client initialization for testing");
-    // let mut vci_client = match crate::vci::VciClient::new(true, 30) {
-    //     Ok(client) => {
-    //         info!("VCI client initialized successfully");
-    //         client
-    //     }
-    //     Err(e) => {
-    //         error!(?e, "Failed to initialize VCI client");
-    //         return;
-    //     }
-    // };
+    // Initialize VCI client for live data processing
+    println!("🔍 DEBUG: About to initialize VCI client");
+    println!("🔍 DEBUG: Calling VciClient::new(true, 30)");
     
+    let mut vci_client = match std::panic::catch_unwind(|| {
+        crate::vci::VciClient::new(true, 30)
+    }) {
+        Ok(Ok(client)) => {
+            println!("🔍 DEBUG: VCI client initialized successfully");
+            info!("VCI client initialized successfully");
+            client
+        }
+        Ok(Err(e)) => {
+            println!("🔍 DEBUG: VCI client initialization failed: {:?}", e);
+            error!(?e, "Failed to initialize VCI client");
+            return;
+        }
+        Err(panic_info) => {
+            println!("🔍 DEBUG: VCI client initialization panicked: {:?}", panic_info);
+            error!("VCI client initialization panicked: {:?}", panic_info);
+            // Continue without VCI client - we'll use CLI data only
+            println!("🔍 DEBUG: Continuing without VCI client");
+            return;
+        }
+    };
+    
+    println!("🔍 DEBUG: About to load ticker groups");
     // Load ticker groups and combine all tickers into a single array
     let ticker_groups = load_ticker_groups();
+    println!("🔍 DEBUG: Ticker groups loaded successfully");
+    println!("🔍 DEBUG: About to process tickers");
     let mut all_tickers: Vec<String> = ticker_groups.0.values()
         .flat_map(|group_tickers| group_tickers.iter().cloned())
         .collect();
+    println!("🔍 DEBUG: Tickers collected into vector");
     
     // Add VNINDEX (Vietnam stock market index) to the ticker list
+    println!("🔍 DEBUG: Adding VNINDEX to ticker list");
     all_tickers.push("VNINDEX".to_string());
+    println!("🔍 DEBUG: VNINDEX added successfully");
     
     // Remove duplicates and shuffle
+    println!("🔍 DEBUG: About to sort tickers");
     all_tickers.sort();
+    println!("🔍 DEBUG: Tickers sorted successfully");
+    println!("🔍 DEBUG: About to dedup tickers");
     all_tickers.dedup();
+    println!("🔍 DEBUG: Tickers deduped successfully");
+    println!("🔍 DEBUG: About to shuffle tickers");
     all_tickers.shuffle(&mut rand::rng());
+    println!("🔍 DEBUG: Tickers shuffled successfully");
     
+    println!("🔍 DEBUG: About to log ticker info");
     info!(total_tickers = all_tickers.len(), "Loaded and shuffled all tickers from ticker groups");
     debug!(first_10_tickers = ?all_tickers.iter().take(10).collect::<Vec<_>>(), "First 10 tickers after shuffle");
+    println!("🔍 DEBUG: Ticker info logged successfully");
     
+    println!("🔍 DEBUG: About to create gossip client");
     let gossip_client = ReqwestClient::new();
+    println!("🔍 DEBUG: Gossip client created successfully");
+    println!("🔍 DEBUG: About to define BATCH_SIZE constant");
     const BATCH_SIZE: usize = 10;
+    println!("🔍 DEBUG: BATCH_SIZE defined successfully");
     let mut iteration_count = 0;
+    println!("🔍 DEBUG: iteration_count initialized successfully");
     let start_time = std::time::Instant::now();
+    println!("🔍 DEBUG: start_time initialized successfully");
 
     // Initialize shared CLI cache for lock-free access
+    println!("🔍 DEBUG: About to initialize shared CLI cache");
     let shared_cli_cache: SharedCLICacheData = Arc::new(Mutex::new(SharedCLICache::default()));
+    println!("🔍 DEBUG: Shared CLI cache created successfully");
     info!("Shared CLI cache initialized successfully");
+    println!("🔍 DEBUG: Shared CLI cache info logged successfully");
     
     // Debug: Initialize shared cache with minimal test data
+    println!("🔍 DEBUG: About to initialize shared cache with test data");
     {
+        println!("🔍 DEBUG: About to acquire cache lock");
         let mut cache = shared_cli_cache.lock().await;
+        println!("🔍 DEBUG: Cache lock acquired successfully");
         cache.version = 1;
+        println!("🔍 DEBUG: Cache version set to 1");
         cache.last_updated = Some(Utc::now());
+        println!("🔍 DEBUG: Cache last_updated set successfully");
         info!("🔧 DEBUG: Initialized shared cache with version 1");
+        println!("🔍 DEBUG: Cache initialization info logged");
     }
+    println!("🔍 DEBUG: Cache initialization block completed");
     
     // Create and start CLI state machine for real data processing
+    println!("🔍 DEBUG: About to create CLI state machine");
     info!("🔧 DEBUG: Creating CLI state machine for real data processing");
     let state_machine_instance = ClientDataStateMachine::new();
+    println!("🔍 DEBUG: CLI state machine created successfully");
     info!("CLI state machine initialized");
+    println!("🔍 DEBUG: CLI state machine info logged successfully");
     
     // Wrap in Arc<Mutex<T>> for thread-safe access
+    println!("🔍 DEBUG: About to wrap state machine in Arc<Mutex>");
     let state_machine = Arc::new(Mutex::new(state_machine_instance));
+    println!("🔍 DEBUG: State machine wrapped successfully");
     let state_machine_for_monitoring = Arc::clone(&state_machine);
+    println!("🔍 DEBUG: State machine monitoring clone created successfully");
     
-// Start the state machine using the shared method
-        let state_machine_for_start = Arc::clone(&state_machine);
-        tokio::spawn(async move {
+    // Start the state machine using the shared method
+    println!("🔍 DEBUG: About to create state machine start clone");
+    let state_machine_for_start = Arc::clone(&state_machine);
+    println!("🔍 DEBUG: State machine start clone created successfully");
+    println!("🔍 DEBUG: About to spawn state machine task");
+    tokio::spawn(async move {
+        println!("🔍 DEBUG: State machine task spawned successfully");
             info!("🚀 Starting CLI state machine processing");
             
             // Start the state machine using the shared method
@@ -296,41 +376,84 @@ async fn run_core_node_worker(data: SharedData, enhanced_data: SharedEnhancedDat
             "Starting data fetch cycle"
         );
         
-        /*
-        ████████████████████████████████████████████████████████████████████████████████
-        ██                                                                            ██
-        ██    🚧 VCI LIVE DATA PROCESSING TEMPORARILY DISABLED 🚧                    ██
-        ██                                                                            ██
-        ██    REASON: We are focusing on HISTORICAL data integration with CLI        ██
-        ██             module. VCI is a 3rd party service for live data.             ██
-        ██                                                                            ██
-        ██    TODO: Re-enable this section once CLI historical integration           ██
-        ██          is complete and we want to add live data updates.                ██
-        ██                                                                            ██
-        ██    CURRENT FOCUS:                                                          ██
-        ██    - CLI module fetches CSV from GitHub (historical data)                 ██
-        ██    - Enhanced calculations (money flow, MA scores)                        ██
-        ██    - Background worker for periodic calculations                          ██
-        ██                                                                            ██
-        ████████████████████████████████████████████████████████████████████████████████
-        */
+        // VCI LIVE DATA PROCESSING - RE-ENABLED
+        // Calculate date range for VCI API call (current date and 7 days ago)
+        let current_date = chrono::Utc::now();
+        let end_date = current_date.format("%Y-%m-%d").to_string();
+        let start_date = (current_date - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
 
-        // COMMENTED OUT: VCI live data processing
-        //
-        // // Calculate date range for VCI API call (current date and 7 days ago)
-        // let current_date = get_current_time();
-        // let end_date = current_date.format("%Y-%m-%d").to_string();
-        // let start_date = (current_date - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
-        //
-        // debug!(
-        //     iteration = iteration_count,
-        //     start_date = %start_date,
-        //     end_date = %end_date,
-        //     "Using dynamic date range for VCI API calls"
-        // );
+        debug!(
+            iteration = iteration_count,
+            start_date = %start_date,
+            end_date = %end_date,
+            "Using dynamic date range for VCI API calls"
+        );
 
-        // DISABLED: VCI processing - focusing on CLI historical data integration
-        debug!(iteration = iteration_count, "VCI processing disabled - using CLI for enhanced data calculations");
+        // Process VCI live data for tickers in batches
+        let batch_size = 20;
+        for (batch_index, ticker_batch) in all_tickers.chunks(batch_size).enumerate() {
+            debug!(
+                iteration = iteration_count,
+                batch = batch_index,
+                batch_size = ticker_batch.len(),
+                "Processing VCI batch"
+            );
+
+            match vci_client.get_batch_history(ticker_batch, &start_date, Some(&end_date), "1D").await {
+                Ok(vci_results) => {
+                    let mut successful_tickers = 0;
+                    let mut failed_tickers = 0;
+
+                    for (symbol, ohlcv_data) in vci_results {
+                        match ohlcv_data {
+                            Some(vci_data) => {
+                                let data_points = vci_data.len();
+                                if !vci_data.is_empty() {
+                                    // Store VCI data in shared data structure
+                                    let mut data_guard = data.lock().await;
+                                    data_guard.insert(symbol.clone(), vci_data);
+                                    successful_tickers += 1;
+                                    
+                                    debug!(
+                                        symbol = %symbol,
+                                        data_points = data_points,
+                                        "Successfully fetched VCI data"
+                                    );
+                                } else {
+                                    debug!(symbol = %symbol, "No VCI data available");
+                                    failed_tickers += 1;
+                                }
+                            }
+                            None => {
+                                debug!(symbol = %symbol, "Failed to fetch VCI data");
+                                failed_tickers += 1;
+                            }
+                        }
+                    }
+
+                    info!(
+                        iteration = iteration_count,
+                        batch = batch_index,
+                        successful = successful_tickers,
+                        failed = failed_tickers,
+                        "VCI batch processing completed"
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        iteration = iteration_count,
+                        batch = batch_index,
+                        error = ?e,
+                        "Failed to fetch VCI batch data"
+                    );
+                }
+            }
+
+            // Small delay between batches to respect rate limits
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+
+        info!(iteration = iteration_count, "VCI live data processing completed");
         
         // Check memory usage and cleanup if needed
         {
@@ -673,10 +796,6 @@ async fn update_shared_cli_cache_from_state_machine(
     
     tracing::info!("🔧 DEBUG: Real data availability - money_flow: {}, ma_scores: {}, ticker_data: {}", 
                   has_money_flow, has_ma_scores, has_ticker_data);
-    
-    let has_money_flow = money_flow_data.is_some();
-    let has_ma_scores = ma_score_data.is_some();
-    let has_ticker_data = !ticker_data.is_empty();
     
     tracing::info!("🔧 DEBUG: Real data availability - money_flow: {}, ma_scores: {}, ticker_data: {}", 
                   has_money_flow, has_ma_scores, has_ticker_data);

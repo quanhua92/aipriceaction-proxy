@@ -127,12 +127,23 @@ async fn main() {
     };
 
     tracing::info!("About to spawn background worker");
-    let worker_handle = tokio::spawn(worker::run(
-        shared_data.clone(),
-        shared_enhanced_data.clone(),
-        app_config.clone(),
-        shared_health_stats.clone(),
-    ));
+    let worker_config = app_config.clone();
+    let worker_handle = tokio::spawn(async move {
+        println!("🔍 DEBUG: Worker task started");
+        match tokio::spawn(worker::run(
+            shared_data.clone(),
+            shared_enhanced_data.clone(),
+            worker_config,
+            shared_health_stats.clone(),
+        )).await {
+            Ok(worker_result) => {
+                println!("🔍 DEBUG: Worker completed successfully: {:?}", worker_result);
+            }
+            Err(e) => {
+                println!("🔍 DEBUG: Worker panicked: {:?}", e);
+            }
+        }
+    });
     
     tracing::info!("Worker spawned successfully, continuing to HTTP server setup");
 
