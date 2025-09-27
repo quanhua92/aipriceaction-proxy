@@ -78,9 +78,17 @@ async fn main() {
 
     // Set a global span with node_name for all subsequent logs
     let _span = tracing::info_span!("node", name = %app_config.node_name).entered();
-    
+
+    // Initialize custom rayon thread pool to avoid blocking async runtime
+    let num_threads = num_cpus::get().saturating_sub(2).max(1);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .thread_name(|index| format!("rayon-{}", index))
+        .build_global()
+        .expect("Failed to initialize rayon thread pool");
+
     tracing::info!("Starting aipriceaction-proxy");
-    tracing::info!(?app_config.environment, port = app_config.port, "Loaded configuration");
+    tracing::info!(?app_config.environment, port = app_config.port, rayon_threads = num_threads, "Loaded configuration");
     
     let shared_data: SharedData = Arc::new(Mutex::new(InMemoryData::new()));
     let shared_enhanced_data: SharedEnhancedData = Arc::new(Mutex::new(EnhancedInMemoryData::new()));

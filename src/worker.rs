@@ -377,9 +377,9 @@ async fn update_enhanced_data(
     analysis_service: Arc<AnalysisService>,
     tickers: Vec<String>,
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    // Define date range for calculations (limit to reasonable calculation range)
-    // Download ALL data but calculate only for recent period to avoid server hanging
-    let date_range = DateRangeConfig::new(TimeRange::ThreeMonths);
+    // Define date range for calculations (now safe to use ALL with improved performance optimizations)
+    // Download and calculate ALL historical data with proper async isolation and batching
+    let date_range = DateRangeConfig::new(TimeRange::All);
 
     // Fetch and calculate enhanced data
     let calculated_data = analysis_service

@@ -233,6 +233,10 @@ impl CSVDataService {
             TimeRange::OneYear => {
                 vec!["ticker_365_days.csv"]
             }
+            TimeRange::All => {
+                // Skip aggregated cache for ALL - download individual CSVs for full historical data
+                return Ok(None);
+            }
             TimeRange::Custom => {
                 // For custom ranges, estimate which cache to use
                 if let (Some(start), Some(end)) = (date_range.start_date, date_range.end_date) {
