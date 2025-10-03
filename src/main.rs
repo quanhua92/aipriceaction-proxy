@@ -131,6 +131,14 @@ async fn main() {
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
         .allow_headers(Any);
 
+    tracing::info!("Registering routes:");
+    tracing::info!("  GET  /tickers");
+    tracing::info!("  GET  /tickers/group");
+    tracing::info!("  POST /gossip");
+    tracing::info!("  POST /public/gossip");
+    tracing::info!("  GET  /health");
+    tracing::info!("  GET  /raw/{{*path}}");
+
     let app = Router::new()
         .route("/tickers", get(api::get_all_tickers_handler))
         .route("/tickers/group", get(api::get_ticker_groups_handler))

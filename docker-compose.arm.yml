@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  # ARM64 local testing deployment
+  aipriceaction-proxy:
+    image: aipriceaction-proxy:debug-route
+    container_name: aipriceaction-proxy-arm-test
+    ports:
+      - "8888:8888"
+    environment:
+      - NODE_NAME=aipriceaction-proxy-arm-local
+      - PRIMARY_TOKEN=test-primary-token-12345
+      - SECONDARY_TOKEN=test-secondary-token-67890
+      - INTERNAL_PEER_URLS=
+      - PUBLIC_PEER_URLS=https://api.aipriceaction.com
+      - PUBLIC_REFRESH_INTERVAL=300
+      - CORE_WORKER_INTERVAL=30
+      - ENVIRONMENT=development
+      - PORT=8888
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
