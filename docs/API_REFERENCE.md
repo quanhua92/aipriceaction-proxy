@@ -275,6 +275,89 @@ curl "http://localhost:8888/health"
 
 ---
 
+### 6. Raw Data Proxy
+
+Proxy endpoint for fetching raw data files from GitHub repository with intelligent caching.
+
+**Endpoint:** `GET /raw/{*path}`
+
+**Query Parameters:**
+- `clearCache` (optional): Set to `true` to force refresh from GitHub, bypassing cache
+
+**Path Parameter:**
+- `path`: Flexible path to any file in the GitHub repository, supports nested directories
+
+**Caching Behavior:**
+- **Server-side cache:** 60 seconds (files cached in temp directory)
+- **Client-side cache:** 30 seconds (via `Cache-Control` header)
+- **Cache invalidation:** Use `?clearCache=true` to force refresh
+
+**Supported File Types:**
+- CSV files (`.csv`) - `content-type: text/csv`
+- JSON files (`.json`) - `content-type: application/json`
+- Text files (`.txt`) - `content-type: text/plain`
+- XML files (`.xml`) - `content-type: application/xml`
+- HTML files (`.html`) - `content-type: text/html`
+- Markdown files (`.md`) - `content-type: text/markdown`
+- Other files - `content-type: application/octet-stream`
+
+**Examples:**
+
+```bash
+# Fetch root-level CSV file
+curl "http://localhost:8888/raw/ticker_60_days.csv"
+
+# Fetch file from subdirectory
+curl "http://localhost:8888/raw/market_data/AAA.csv"
+
+# Fetch company information (JSON)
+curl "http://localhost:8888/raw/company_data/ACG_company_info.json"
+
+# Fetch deeply nested minute data
+curl "http://localhost:8888/raw/market_data_minutes/2025/02/ACB.csv"
+
+# Force cache refresh
+curl "http://localhost:8888/raw/ticker_60_days.csv?clearCache=true"
+
+# Check response headers
+curl -I "http://localhost:8888/raw/ticker_60_days.csv"
+```
+
+**Response Format:**
+- Returns the raw file content with appropriate content-type header
+- Includes `Cache-Control: max-age=30` header for client-side caching
+
+**Response Codes:**
+- `200 OK`: File successfully retrieved (from cache or GitHub)
+- `404 Not Found`: File does not exist in the GitHub repository
+- `502 Bad Gateway`: Failed to fetch from GitHub (network error)
+- `500 Internal Server Error`: Failed to read response body
+
+**Response Headers:**
+```
+HTTP/1.1 200 OK
+content-type: text/csv
+cache-control: max-age=30
+```
+
+**Use Cases:**
+- Fetching historical market data files
+- Accessing company information and financial data
+- Retrieving minute-level trading data
+- Serving static data files with caching for performance
+- Building data pipelines with automatic cache management
+
+**GitHub Repository:**
+- Base URL: `https://raw.githubusercontent.com/quanhua92/aipriceaction-data/refs/heads/main/`
+- All paths are relative to this base URL
+
+**Cache Management:**
+- Cache files stored in: System temp directory under `aipriceaction-proxy-cache/`
+- Cache naming: Path separators replaced with underscores (e.g., `market_data_AAA.csv`)
+- Automatic cleanup: Old cache files (>60s) are periodically cleaned up
+
+---
+
 ## Data Models
 
 ### OhlcvData

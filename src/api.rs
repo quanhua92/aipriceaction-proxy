@@ -1,8 +1,9 @@
 use crate::config::SharedTokenConfig;
 use crate::data_structures::{LastInternalUpdate, SharedData, SharedReputation, SharedTickerGroups, SharedHealthStats};
 use crate::vci::OhlcvData;
+use crate::utils::cache;
 use axum::{
-    extract::{ConnectInfo, State, Json},
+    extract::{ConnectInfo, State, Json, Path},
     http::{HeaderMap, StatusCode, header::CACHE_CONTROL},
     response::{IntoResponse, Response},
 };
@@ -302,4 +303,108 @@ pub async fn health_handler(
     );
     
     (StatusCode::OK, Json(health_stats))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClearCacheParams {
+    #[serde(rename = "clearCache")]
+    clear_cache: Option<bool>,
+}
+
+const GITHUB_RAW_BASE_URL: &str = "https://raw.githubusercontent.com/quanhua92/aipriceaction-data/refs/heads/main/";
+
+#[instrument(skip_all, fields(path = %path))]
+pub async fn raw_proxy_handler(
+    Path(path): Path<String>,
+    Query(params): Query<ClearCacheParams>,
+) -> impl IntoResponse {
+    debug!(path, clear_cache = ?params.clear_cache, "Received raw proxy request");
+
+    // Determine if we should clear/bypass cache
+    let should_clear_cache = params.clear_cache.unwrap_or(false);
+
+    // Check cache first unless clearCache is true
+    if !should_clear_cache && cache::is_cache_valid(&path) {
+        match cache::read_cache(&path) {
+            Ok(content) => {
+                info!(path, content_size = content.len(), "Serving from cache");
+                let content_type = get_content_type(&path);
+                let mut headers = HeaderMap::new();
+                headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+                headers.insert("content-type", content_type.parse().unwrap());
+                return (StatusCode::OK, headers, content).into_response();
+            }
+            Err(e) => {
+                warn!(path, ?e, "Failed to read from cache, fetching from GitHub");
+            }
+        }
+    }
+
+    // If clearCache is requested, remove the cached file
+    if should_clear_cache {
+        if let Err(e) = cache::clear_cache(&path) {
+            warn!(path, ?e, "Failed to clear cache");
+        }
+    }
+
+    // Fetch from GitHub
+    let github_url = format!("{}{}", GITHUB_RAW_BASE_URL, path);
+    debug!(path, github_url, "Fetching from GitHub");
+
+    match reqwest::get(&github_url).await {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.bytes().await {
+                    Ok(bytes) => {
+                        let content = bytes.to_vec();
+                        info!(path, content_size = content.len(), "Fetched from GitHub");
+
+                        // Cache the content
+                        if let Err(e) = cache::write_cache(&path, &content) {
+                            warn!(path, ?e, "Failed to write to cache");
+                        }
+
+                        let content_type = get_content_type(&path);
+                        let mut headers = HeaderMap::new();
+                        headers.insert(CACHE_CONTROL, "max-age=30".parse().unwrap());
+                        headers.insert("content-type", content_type.parse().unwrap());
+                        (StatusCode::OK, headers, content).into_response()
+                    }
+                    Err(e) => {
+                        error!(path, ?e, "Failed to read response body");
+                        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read response body").into_response()
+                    }
+                }
+            } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+                warn!(path, "File not found on GitHub");
+                (StatusCode::NOT_FOUND, "File not found").into_response()
+            } else {
+                error!(path, status = ?response.status(), "GitHub request failed");
+                (StatusCode::BAD_GATEWAY, "Failed to fetch from GitHub").into_response()
+            }
+        }
+        Err(e) => {
+            error!(path, ?e, "Failed to fetch from GitHub");
+            (StatusCode::BAD_GATEWAY, "Failed to fetch from GitHub").into_response()
+        }
+    }
+}
+
+/// Determine content type based on file extension
+fn get_content_type(path: &str) -> &'static str {
+    if path.ends_with(".csv") {
+        "text/csv"
+    } else if path.ends_with(".json") {
+        "application/json"
+    } else if path.ends_with(".txt") {
+        "text/plain"
+    } else if path.ends_with(".xml") {
+        "application/xml"
+    } else if path.ends_with(".html") {
+        "text/html"
+    } else if path.ends_with(".md") {
+        "text/markdown"
+    } else {
+        "application/octet-stream"
+    }
 }

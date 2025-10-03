@@ -1,6 +1,7 @@
 pub mod api;
 pub mod config;
 pub mod data_structures;
+pub mod utils;
 pub mod vci;
 pub mod worker;
 
@@ -139,6 +140,7 @@ async fn main() {
             post(api::public_gossip_handler).layer(GovernorLayer::new(governor_conf)),
         )
         .route("/health", get(api::health_handler))
+        .route("/raw/{*path}", get(api::raw_proxy_handler))
         .layer(cors)
         .with_state(app_state);
 
