@@ -68,4 +68,26 @@ jobs:
     - name: Test built image
       if: github.event_name != 'pull_request'
       run: |
-        docker run --rm ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest --help || true
+        # Start container in background
+        docker run -d --name test-container \
+          -e PRIMARY_TOKEN=test-token \
+          -e SECONDARY_TOKEN=test-token2 \
+          -e INTERNAL_PEER_URLS= \
+          -e PORT=8888 \
+          -e RUST_LOG=info \
+          -p 8888:8888 \
+          ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+
+        # Wait for server to start
+        sleep 5
+
+        # Test health endpoint
+        curl -f http://localhost:8888/health || (docker logs test-container && exit 1)
+
+        # Check route registration in logs
+        docker logs test-container 2>&1 | grep "Registering routes" || echo "Warning: Route registration log not found"
+        docker logs test-container 2>&1 | grep "GET  /raw" || echo "Warning: /raw route not found in logs"
+
+        # Stop and remove container
+        docker stop test-container
+        docker rm test-container
