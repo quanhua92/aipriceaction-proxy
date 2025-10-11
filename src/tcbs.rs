@@ -161,6 +161,7 @@ impl TcbsClient {
     fn get_index_mapping(&self, symbol: &str) -> String {
         match symbol {
             "VNINDEX" => "VNINDEX".to_string(),
+            "VN30" => "VN30".to_string(),
             "HNXINDEX" => "HNXIndex".to_string(),
             "UPCOMINDEX" => "UPCOM".to_string(),
             _ => symbol.to_string(),

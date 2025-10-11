@@ -45,7 +45,7 @@ Retrieve OHLCV (Open, High, Low, Close, Volume) data for stocks.
 curl "http://localhost:8888/tickers"
 
 # Get latest data for specific tickers (most recent data point only)
-curl "http://localhost:8888/tickers?symbol=VNINDEX&symbol=VIX"
+curl "http://localhost:8888/tickers?symbol=VNINDEX&symbol=VN30&symbol=VIX"
 
 # Get historical data for a date range (multiple data points)
 curl "http://localhost:8888/tickers?start_date=2025-08-01&end_date=2025-08-15"
