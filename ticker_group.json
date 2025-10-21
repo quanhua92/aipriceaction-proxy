@@ -5,6 +5,7 @@
         "VHM",
         "VIC",
         "VRE",
+        "CRV",
         "KDH",
         "SSH",
         "NVL",
@@ -45,6 +46,7 @@
     ],
     "CAO_SU": ["GVR", "PHR", "DRC", "DPR", "DRG", "DRI", "VRG"],
     "CHUNG_KHOAN": [
+        "TCX",
         "SSI",
         "VND",
         "VCI",
@@ -63,6 +65,7 @@
         "ORS",
         "APG",
         "TVB",
+        "EVF",
         "EVS",
         "TCI",
         "SBS",
@@ -85,7 +88,7 @@
     "DET_MAY": ["VGT", "TCM", "MSH", "TNG", "STK", "PPH", "GIL", "ADS", "EVE"],
     "HANG_KHONG": ["ACV", "VJC", "HVN", "SCS", "SAS", "NCT", "SGN"],
     "HOA_CHAT": ["DGC", "DCM", "DPM", "LAS", "DDV", "BFC", "CSV"],
-    "KHAI_KHOANG": ["MSR", "CST", "VPG", "NNC", "NBC", "BMC", "TNT"],
+    "KHAI_KHOANG": ["CST", "VPG", "NNC", "NBC", "BMC", "TNT"],
     "NANG_LUONG": ["POW", "HDG", "QTP", "NT2", "GEG", "PPC"],
     "NGAN_HANG": [
         "VCB",
@@ -103,8 +106,7 @@
         "SHB",
         "EIB",
         "OCB",
-        "MSB",
-        "EVF"
+        "MSB"
     ],
     "NHUA": ["NTP", "BMP", "AAA", "APH", "NHH", "HCD"],
     "NONG_NGHIEP": ["HAG", "DBC", "PAN", "VLC", "BAF", "LTG", "NAF", "TSC"],
@@ -113,7 +115,6 @@
         "GEX",
         "VCS",
         "BWE",
-        "ACG",
         "TDM",
         "HHS",
         "DHC",
@@ -152,7 +153,6 @@
         "TVN",
         "VIF",
         "NKG",
-        "PTB",
         "GDA",
         "VGS",
         "SMC",
