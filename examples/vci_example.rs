@@ -87,6 +87,37 @@ async fn main() -> Result<(), VciError> {
         Err(e) => println!("❌ Batch request failed: {:?}", e),
     }
 
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    // 4. Test new ticker list from 2025-10-21
+    println!("\n🆕 Testing new ticker list from 2025-10-21");
+    println!("{}", "-".repeat(40));
+
+    let new_tickers = vec!["TCX".to_string()];
+    let start_date = "2025-10-21";
+    let end_date = "2025-10-21"; // Same day for current data
+
+    for ticker in &new_tickers {
+        match client.get_history(ticker, start_date, Some(end_date), "1D").await {
+            Ok(data) => {
+                if !data.is_empty() {
+                    println!("✅ Success! {} is available with data:", ticker);
+                    let latest = &data[0];
+                    println!("💹 Price: {:.0} VND (Vol: {})", latest.close, latest.volume);
+                    println!("📅 Date: {}", latest.time.format("%Y-%m-%d"));
+                } else {
+                    println!("❌ {} returned no data for {}", ticker, start_date);
+                }
+            }
+            Err(VciError::NoData) => {
+                println!("❌ {} is not available or no data for {}", ticker, start_date);
+            }
+            Err(e) => {
+                println!("❌ Failed to retrieve data for {}: {:?}", ticker, e);
+            }
+        }
+    }
+
     println!("\n{}", "=".repeat(60));
     println!("✅ VCI CLIENT EXAMPLE COMPLETED");
     println!("{}", "=".repeat(60));
